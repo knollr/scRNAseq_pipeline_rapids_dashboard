@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir \
     hdf5plugin==5.1.0 \
     rmm-cu11==25.6.0 \
     rapids-singlecell==0.13.2 \
-    rpy2==3.7.0 \
+    rpy2==3.6.3 \
     scikit-learn==1.3.2 \
     plotly==5.15.0 \
     dash==2.19.0 \
