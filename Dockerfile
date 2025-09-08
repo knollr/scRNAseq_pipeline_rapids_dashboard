@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     r-base \
     libpcre2-dev libpcre3-dev liblzma-dev libbz2-dev libicu-dev zlib1g-dev \
+    libopenblas-dev liblapack-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.11 via deadsnakes
