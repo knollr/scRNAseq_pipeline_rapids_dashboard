@@ -6,7 +6,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # Install system dependencies
-# Install system dependencies (with newer Python via deadsnakes)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git wget curl bzip2 ca-certificates \
     build-essential cmake pkg-config \
@@ -15,11 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     r-base \
  && add-apt-repository ppa:deadsnakes/ppa \
  && apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 python3.12-distutils python3.12-venv python3.12-dev \
+    python3.12 python3.12-venv python3.12-dev \
  && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
  && ln -s /usr/bin/python3.12 /usr/local/bin/python3 \
  && python3 -m pip install --upgrade pip setuptools wheel \
  && rm -rf /var/lib/apt/lists/*
+
 
 # Upgrade pip
 RUN python3 -m pip install --upgrade pip setuptools wheel
