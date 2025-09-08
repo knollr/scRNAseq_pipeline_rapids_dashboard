@@ -12,7 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libhdf5-serial-dev hdf5-tools \
     software-properties-common \
     r-base \
- && add-apt-repository ppa:deadsnakes/ppa \
+    libpcre2-dev libpcre3-dev liblzma-dev libbz2-dev libicu-dev zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Python 3.11 via deadsnakes
+RUN add-apt-repository ppa:deadsnakes/ppa \
  && apt-get update && apt-get install -y --no-install-recommends \
     python3.11 python3.11-venv python3.11-dev \
  && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
