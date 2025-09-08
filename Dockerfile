@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir \
     numpy==2.3.2 \
     mudata==0.3.2 \
     hdf5plugin==5.1.0 \
-    rmm==23.12 \
+    rmm-cu11==25.6.0 \
     rapids-singlecell==0.13.2 \
     rpy2==3.7.0 \
     scikit-learn==1.3.2 \
