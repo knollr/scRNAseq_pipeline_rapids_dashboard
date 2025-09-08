@@ -35,22 +35,19 @@ RUN pip install --no-cache-dir \
     rmm-cu11==25.6.0 \
     rapids-singlecell==0.13.2 \
     rpy2==3.6.3 \
-    scikit-learn==1.3.2 \
-    plotly==5.15.0 \
-    dash==2.19.0 \
-    numpy==1.26.4 \
-    scipy==1.13.1 \
-    matplotlib==3.9.2 \
+    scikit-learn==1.7.1 \
+    plotly==6.3.0 \
+    dash==3.2.0 \
+    scipy==1.16.1 \
+    matplotlib==3.10.6 \
     seaborn==0.13.2 \
-    scikit-learn==1.5.2 \
-    igraph==0.11.8 \
+    igraph==0.11.9 \
     leidenalg==0.10.2 \
-    plotly==5.24.1 \
-    zarr==2.18.2 \
-    loompy==3.0.7 \
-    decoupler==1.6.0 \
-    gseapy==1.1.4 \
-    goatools==1.4.12 \
+    zarr==3.1.2 \
+    loompy==3.0.8 \
+    decoupler==2.1.1 \
+    gseapy==1.1.9 \
+    goatools==1.5.1 \
     pyscenic==0.12.1
 
 # Install Seurat and SeuratDisk (for Seurat -> AnnData conversion)
