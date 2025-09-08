@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir \
     scanpy==1.11.4 \
     anndata==0.12.2 \
     pandas==2.3.2 \
-    numpy==2.3.2 \
+    numpy==1.26.4 \
     mudata==0.3.2 \
     hdf5plugin==5.1.0 \
     rmm-cu11==25.6.0 \
