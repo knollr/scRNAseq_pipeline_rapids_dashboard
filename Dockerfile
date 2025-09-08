@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake pkg-config \
     libhdf5-serial-dev hdf5-tools \
     software-properties-common \
-    r-base \
+    r-base r-base-dev \
+    libcurl4-openssl-dev libssl-dev libxml2-dev \
  && add-apt-repository ppa:deadsnakes/ppa \
  && apt-get update && apt-get install -y --no-install-recommends \
     python3.12 python3.12-venv python3.12-dev \
