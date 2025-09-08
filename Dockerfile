@@ -56,8 +56,8 @@ RUN pip install --no-cache-dir \
     pyscenic==0.12.1
 
 # Install Seurat and SeuratDisk (for Seurat -> AnnData conversion)
-RUN R -e "install.packages(c('Seurat', 'SeuratObject'), repos='https://cloud.r-project.org')" \
-    && R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('mojaveazure/SeuratDisk')"
+RUN R -e "install.packages(c('Seurat', 'SeuratObject', 'SeuratDisk'), repos='https://cloud.r-project.org')"
+
 
 # Set working directory
 WORKDIR /pipeline
