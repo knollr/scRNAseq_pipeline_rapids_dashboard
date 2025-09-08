@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     scikit-learn==1.7.1 \
     plotly==6.3.0 \
     dash==3.2.0 \
-    scipy==1.16.1 \
+    scipy==1.15.3 \
     matplotlib==3.10.6 \
     seaborn==0.13.2 \
     igraph==0.11.9 \
