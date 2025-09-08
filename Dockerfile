@@ -11,13 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake pkg-config \
     libhdf5-serial-dev hdf5-tools \
     software-properties-common \
-    r-base r-base-dev \
-    libcurl4-openssl-dev libssl-dev libxml2-dev \
+    r-base \
  && add-apt-repository ppa:deadsnakes/ppa \
  && apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 python3.12-venv python3.12-dev \
- && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
- && ln -s /usr/bin/python3.12 /usr/local/bin/python3 \
+    python3.11 python3.11-venv python3.11-dev \
+ && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
+ && ln -s /usr/bin/python3.11 /usr/local/bin/python3 \
  && python3 -m pip install --upgrade pip setuptools wheel \
  && rm -rf /var/lib/apt/lists/*
 
