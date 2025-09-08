@@ -1,0 +1,13 @@
+
+---
+
+### `config.yaml`
+```yaml
+input_data: "data/raw/10x_matrix.mtx"
+output_dir: "results/"
+use_gpu: false
+
+qc:
+  min_genes: 200
+  max_genes: 6000
+  max_mt: 0.1
