@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     r-base \
     libpcre2-dev libpcre3-dev liblzma-dev libbz2-dev libicu-dev zlib1g-dev \
+    libopenblas-dev liblapack-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.11 via deadsnakes
@@ -33,7 +34,7 @@ RUN pip install --no-cache-dir \
     scanpy==1.11.4 \
     anndata==0.12.2 \
     pandas==2.3.2 \
-    numpy==2.3.2 \
+    numpy==1.26.4 \
     mudata==0.3.2 \
     hdf5plugin==5.1.0 \
     rmm-cu11==25.6.0 \
@@ -56,8 +57,8 @@ RUN pip install --no-cache-dir \
     celltypist ==1.7.1
 
 # Install Seurat and SeuratDisk (for Seurat -> AnnData conversion)
-RUN R -e "install.packages(c('Seurat', 'SeuratObject'), repos='https://cloud.r-project.org')" \
-    && R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('mojaveazure/SeuratDisk')"
+RUN R -e "install.packages(c('Seurat', 'SeuratObject', 'SeuratDisk'), repos='https://cloud.r-project.org')"
+
 
 # Set working directory
 WORKDIR /pipeline
