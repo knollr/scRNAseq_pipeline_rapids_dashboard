@@ -56,8 +56,10 @@ RUN pip install --no-cache-dir \
     pyscenic==0.12.1 \
     celltypist==1.7.1
 
-# Install Seurat and SeuratDisk (for Seurat -> AnnData conversion)
-RUN R -e "install.packages(c('Seurat', 'SeuratObject', 'SeuratDisk'), repos='https://cloud.r-project.org')"
+# Install Seurat and packages
+RUN R -e "install.packages('Seurat', repos='https://cloud.r-project.org')"
+RUN R -e "install.packages('SeuratObject', repos='https://cloud.r-project.org')"
+RUN R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('mojaveazure/seurat-disk')"
 
 
 # Set working directory
