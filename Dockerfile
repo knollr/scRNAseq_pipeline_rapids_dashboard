@@ -54,7 +54,7 @@ RUN pip install --no-cache-dir \
     gseapy==1.1.9 \
     goatools==1.5.1 \
     pyscenic==0.12.1 \
-    celltypist ==1.7.1
+    celltypist==1.7.1
 
 # Install Seurat and SeuratDisk (for Seurat -> AnnData conversion)
 RUN R -e "install.packages(c('Seurat', 'SeuratObject', 'SeuratDisk'), repos='https://cloud.r-project.org')"
