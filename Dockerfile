@@ -7,14 +7,18 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git wget curl bzip2 ca-certificates \
-    build-essential cmake pkg-config \
-    libhdf5-serial-dev hdf5-tools \
-    software-properties-common \
-    r-base \
-    libpcre2-dev libpcre3-dev liblzma-dev libbz2-dev libicu-dev zlib1g-dev \
-    libopenblas-dev liblapack-dev \
- && rm -rf /var/lib/apt/lists/*
+    libcurl4-openssl-dev \
+    libssl-dev \
+    libxml2-dev \
+    libhdf5-dev \
+    libfftw3-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    gfortran \
+    libblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.11 via deadsnakes
 RUN add-apt-repository ppa:deadsnakes/ppa \
@@ -58,9 +62,12 @@ RUN pip install --no-cache-dir \
 
 # Install Seurat and packages
 RUN R -e "install.packages('Seurat', repos='https://cloud.r-project.org')"
+RUN R -q -e "stopifnot('Seurat' %in% rownames(installed.packages()))"
 RUN R -e "install.packages('SeuratObject', repos='https://cloud.r-project.org')"
+RUN R -q -e "stopifnot('SeuratObject' %in% rownames(installed.packages()))"
 RUN R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_github('mojaveazure/seurat-disk')"
-
+RUN R -q -e "stopifnot('remotes' %in% rownames(installed.packages()))"
+RUN R -q -e "stopifnot('SeuratDisk' %in% rownames(installed.packages()))"
 
 # Set working directory
 WORKDIR /pipeline
