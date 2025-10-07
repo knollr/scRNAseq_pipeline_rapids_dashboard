@@ -5,7 +5,7 @@ FROM rapidsai/ci-conda:cuda11.4.3-ubuntu20.04-py3.12  AS base
 # Optional: set noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
-ENV PATH=/opt/conda/bin:$PATH
+#ENV PATH=/opt/conda/bin:$PATH
 ENV CONDA_HTTP_RETRIES=5
 ENV CONDA_DOWNLOAD_TIMEOUT=300
 
@@ -83,6 +83,8 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
                 cat('❌ Seurat NOT installed\n'); \
                 q(status=1); \
               }"
+
+ENV PATH=/opt/conda/envs/pipeline/bin:/opt/conda/bin:$PATH
 
 # Set working directory
 WORKDIR /pipeline
