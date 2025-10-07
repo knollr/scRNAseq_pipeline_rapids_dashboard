@@ -88,4 +88,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 WORKDIR /pipeline
 
 # Fully activate conda environment on container start
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && exec bash"]
+# Ensure conda.sh is readable and add auto-activation for all shells
+RUN chmod 755 /opt/conda/etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh && conda activate pipeline" >> /etc/bash.bashrc
+ENTRYPOINT ["/bin/bash"]
