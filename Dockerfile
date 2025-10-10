@@ -54,7 +54,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 # Now install your additional Python packages
 RUN pip install --no-cache-dir \
         scanpy==1.11.4 anndata==0.12.2 pandas==2.3.2 \
-        mudata==0.3.2 hdf5plugin==5.1.0 \
+        mudata==0.3.2 muon==0.1.7 hdf5plugin==5.1.0 \
         scikit-learn==1.7.1 plotly==6.3.0 dash==3.2.0 \
         scipy==1.15.3 matplotlib==3.10.6 seaborn==0.13.2 \
         igraph==0.11.9 leidenalg==0.10.2 zarr==3.1.3 \
@@ -75,6 +75,8 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 # Optional: install seurat-disk from GitHub
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -e "remotes::install_github('mojaveazure/seurat-disk')"
+    R -e "devtools::install_github('PMBio/MuDataSeurat')"
+    
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if ('Seurat' %in% rownames(installed.packages())) { \
