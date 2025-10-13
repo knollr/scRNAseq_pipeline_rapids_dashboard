@@ -47,19 +47,21 @@ SHELL ["/bin/bash", "-c"]
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     conda install -y -c conda-forge mamba && \
     mamba install -y -c rapidsai -c nvidia -c conda-forge \
-        rapids=25.06 cudatoolkit=11.4 && \
+        rapids=25.06 cudatoolkit=11.4 snakemake && \
     conda clean -afy
 
 
 # Now install your additional Python packages
-RUN pip install --no-cache-dir \
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    pip install --no-cache-dir \
         scanpy==1.11.4 anndata==0.12.2 pandas==2.3.2 \
         mudata==0.3.2 muon==0.1.7 hdf5plugin==5.1.0 \
         scikit-learn==1.7.1 plotly==6.3.0 dash==3.2.0 \
         scipy==1.15.3 matplotlib==3.10.6 seaborn==0.13.2 \
         igraph==0.11.9 leidenalg==0.10.2 zarr==3.1.3 \
         loompy==3.0.8 decoupler==2.1.1 gseapy==1.1.9 \
-        goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1
+        goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1 \
+        pyyaml rpy2
 
 # Install R + Seurat in the pipeline conda env
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
@@ -95,4 +97,18 @@ WORKDIR /pipeline
 # Ensure conda.sh is readable and add auto-activation for all shells
 RUN chmod 755 /opt/conda/etc/profile.d/conda.sh && \
     echo ". /opt/conda/etc/profile.d/conda.sh && conda activate pipeline" >> /etc/bash.bashrc
-ENTRYPOINT ["/bin/bash"]
+#ENTRYPOINT ["/bin/bash"]
+
+# Add convenient shell entry wrapper
+RUN echo '#!/bin/bash\n' \
+         'source /opt/conda/etc/profile.d/conda.sh\n' \
+         'conda activate pipeline\n' \
+         'if [ "$1" = "snakemake" ]; then\n' \
+         '    shift\n' \
+         '    exec snakemake "$@"\n' \
+         'else\n' \
+         '    exec "$@"\n' \
+         'fi' > /usr/local/bin/run_pipeline && chmod +x /usr/local/bin/run_pipeline
+
+ENTRYPOINT ["/usr/local/bin/run_pipeline"]
+CMD ["/bin/bash"]
