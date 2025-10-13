@@ -1,13 +1,17 @@
-
----
-
 ### `config.yaml`
-```yaml
-input_data: "data/raw/10x_matrix.mtx"
-output_dir: "results/"
-use_gpu: false
 
-qc:
-  min_genes: 200
-  max_genes: 6000
-  max_mt: 0.1
+inputs:
+  - "data/sample1.h5ad"
+  - "data/sample2.h5mu"
+use_gpu: false
+store_raw_counts: true
+
+preprocessing:
+  params:
+    min_genes: 200
+    min_cells: 3
+    n_top_genes: 2000
+    n_pcs: 20
+    n_pcs_prot: 10
+    n_neighbors: 15
+    umap_n_components: 2
