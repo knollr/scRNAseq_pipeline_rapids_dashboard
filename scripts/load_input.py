@@ -17,6 +17,9 @@ import sys
 from pathlib import Path
 import argparse
 
+# ----------------------------
+# Functions
+# ----------------------------
 
 def load_single_file(filepath: str):
     """
@@ -174,6 +177,9 @@ def merge_mudatas(mdatas):
     print(f"✅ Merged MuData with modalities: {list(merged_mdata.mod.keys())}")
     return merged_mdata
 
+# ----------------------------
+# Main
+# ----------------------------
 
 def main(input_files, output_file):
     """
@@ -185,13 +191,19 @@ def main(input_files, output_file):
     merged = merge_adatas(loaded_objects)
 
     # Choose correct write method
+    # Determine output path with proper extension
     if hasattr(merged, "write_h5mu"):
+        output_file = output_file + ".h5mu"
         merged.write_h5mu(output_file)
     else:
+        output_file = output_file + ".h5ad"
         merged.write(output_file)
 
     print(f"💾 Saved merged object to: {output_file}")
 
+# ----------------------------
+# CLI / Snakemake entry point
+# ----------------------------
 
 if __name__ == "__main__":
     # Handle both Snakemake and CLI usage
