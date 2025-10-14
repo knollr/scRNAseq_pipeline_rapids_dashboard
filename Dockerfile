@@ -110,5 +110,9 @@ RUN echo '#!/bin/bash\n' \
          '    exec "$@"\n' \
          'fi' > /usr/local/bin/run_pipeline && chmod +x /usr/local/bin/run_pipeline
 
+# --- Fix permissions for Singularity users ---
+RUN chmod -R a+rX /opt/conda /pipeline
+RUN ls -ld /opt/conda /opt/conda/bin /opt/conda/envs/pipeline/bin
+
 ENTRYPOINT ["/usr/local/bin/run_pipeline"]
 CMD ["/bin/bash"]
