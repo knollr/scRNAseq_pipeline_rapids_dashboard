@@ -21,8 +21,6 @@ import argparse
 import yaml
 import scanpy as sc
 import muon as mu
-import muon.protein as pt
-
 
 # ----------------------------
 # Helper: clustering
@@ -65,7 +63,7 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None):
     for res in resolutions:
         leiden_func(
             obj,
-            resolution=res,
+            resolution=res, flavor="igraph", n_iterations=2, directed = False, 
             key_added=f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
             neighbors_key=wnn_key,
         )
@@ -182,6 +180,7 @@ def preprocess_mdata(mdata, cfg):
 
     # Protein modality
     if "prot" in mdata.mod:
+        from muon import prot as pt
         print("💧 Preprocessing protein modality (CLR normalization)...")
         prot = mdata["prot"]
         pt.pp.clr(prot)

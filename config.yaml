@@ -1,14 +1,14 @@
 ### `config.yaml`
 
 inputs:
-  - "data/sample1.h5ad"
-  - "data/sample2.h5mu"
+  - "data/demo_500_cells.h5ad"
+  - "data/demo_500_cells_2.h5ad"
 use_gpu: false
 store_raw_counts: true
 
 preprocessing:
   params:
-    min_genes: 200
+    min_genes: 100
     min_cells: 3
     n_top_genes: 2000
     n_pcs: 20

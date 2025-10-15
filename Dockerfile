@@ -89,7 +89,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
         igraph==0.11.9 leidenalg==0.10.2 zarr==3.1.3 \
         loompy==3.0.8 decoupler==2.1.1 gseapy==1.1.9 \
         goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1 \
-        pyyaml rpy2
+        pyyaml rpy2 louvain==0.8.2
 
 # validation of installations
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \

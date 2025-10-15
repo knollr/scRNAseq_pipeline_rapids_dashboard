@@ -193,10 +193,10 @@ def main(input_files, output_file):
     # Choose correct write method
     # Determine output path with proper extension
     if hasattr(merged, "write_h5mu"):
-        output_file = output_file + ".h5mu"
+        #output_file = output_file + ".h5mu"
         merged.write_h5mu(output_file)
     else:
-        output_file = output_file + ".h5ad"
+        #output_file = output_file + ".h5ad"
         merged.write(output_file)
 
     print(f"💾 Saved merged object to: {output_file}")
