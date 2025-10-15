@@ -28,7 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gfortran \
         libblas-dev \
         liblapack-dev \
-        build-essential \
+        libgit2-dev \
+        make \
+        g++ \
+        pkg-config \
         # add any libs you need, e.g. libhdf5, etc.
     && rm -rf /var/lib/apt/lists/*
 
@@ -46,22 +49,9 @@ SHELL ["/bin/bash", "-c"]
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     conda install -y -c conda-forge mamba && \
-    mamba install -y -c rapidsai -c nvidia -c conda-forge \
+    mamba install -y -c rapidsai -c nvidia -c conda-forge -c bioconda \
         rapids=25.06 cudatoolkit=11.4 snakemake && \
     conda clean -afy
-
-
-# Now install your additional Python packages
-RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
-    pip install --no-cache-dir \
-        scanpy==1.11.4 anndata==0.12.2 pandas==2.3.2 \
-        mudata==0.3.2 muon==0.1.7 hdf5plugin==5.1.0 \
-        scikit-learn==1.7.1 plotly==6.3.0 dash==3.2.0 \
-        scipy==1.15.3 matplotlib==3.10.6 seaborn==0.13.2 \
-        igraph==0.11.9 leidenalg==0.10.2 zarr==3.1.3 \
-        loompy==3.0.8 decoupler==2.1.1 gseapy==1.1.9 \
-        goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1 \
-        pyyaml rpy2
 
 # Install R + Seurat in the pipeline conda env
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
@@ -76,7 +66,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 
 # Optional: install seurat-disk from GitHub
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
-    R -e "remotes::install_github('mojaveazure/seurat-disk')" \
+    R -e "remotes::install_github('mojaveazure/seurat-disk')" && \
     R -e "devtools::install_github('PMBio/MuDataSeurat')"
     
 
@@ -88,6 +78,24 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
                 q(status=1); \
               }"
 
+
+# Now install your additional Python packages
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    pip install --no-cache-dir \
+        scanpy==1.11.4 anndata==0.12.2 pandas==2.3.2 \
+        mudata==0.3.2 muon==0.1.7 hdf5plugin==5.1.0 \
+        scikit-learn==1.7.1 plotly==6.3.0 dash==3.2.0 \
+        scipy==1.15.3 matplotlib==3.10.6 seaborn==0.13.2 \
+        igraph==0.11.9 leidenalg==0.10.2 zarr==3.1.3 \
+        loompy==3.0.8 decoupler==2.1.1 gseapy==1.1.9 \
+        goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1 \
+        pyyaml rpy2
+
+# validation of installations
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    python -c "import scanpy, anndata, rpy2; print('✅ Python OK')" && \
+    R -q -e "library(Seurat); library(SeuratDisk); cat('✅ R OK\n')"
+
 ENV PATH=/opt/conda/envs/pipeline/bin:/opt/conda/bin:$PATH
 
 # Set working directory
@@ -95,7 +103,7 @@ WORKDIR /pipeline
 
 # Fully activate conda environment on container start
 # Ensure conda.sh is readable and add auto-activation for all shells
-RUN chmod 755 /opt/conda/etc/profile.d/conda.sh && \
+RUN chmod -R a+rX /opt/conda/etc/profile.d && \
     echo ". /opt/conda/etc/profile.d/conda.sh && conda activate pipeline" >> /etc/bash.bashrc
 #ENTRYPOINT ["/bin/bash"]
 
@@ -110,8 +118,10 @@ RUN echo '#!/bin/bash\n' \
          '    exec "$@"\n' \
          'fi' > /usr/local/bin/run_pipeline && chmod +x /usr/local/bin/run_pipeline
 
+
+RUN mkdir -p /pipeline && chmod -R a+rwx /pipeline
 # --- Fix permissions for Singularity users ---
-RUN chmod -R a+rX /opt/conda /pipeline
+RUN chmod -R a+rX /opt/conda /pipeline /usr/local/bin
 RUN ls -ld /opt/conda /opt/conda/bin /opt/conda/envs/pipeline/bin
 
 ENTRYPOINT ["/usr/local/bin/run_pipeline"]
