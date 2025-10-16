@@ -74,63 +74,110 @@ def load_single_file(filepath: str):
 
 def convert_seurat_to_adata(seurat_path: str):
     """
-    Convert a Seurat .rds or .h5Seurat file into AnnData or MuData
-    using MuDataSeurat (R). If multimodal (RNA + ADT), saves to .h5mu;
-    if single modality, saves to .h5ad (RNA assay only).
-
-    Returns either an AnnData or MuData object.
+    Convert a Seurat .rds or .h5Seurat file into AnnData or MuData.
+    Handles both Assay (v4) and Assay5 (v5) objects.
+    For Seurat v5 multimodal (RNA + ADT), exports via zellkonverter and merges in Python.
     """
+
     from rpy2.robjects import r
     import tempfile
     import muon as mu
+    import scanpy as sc
+    from rpy2.rinterface_lib import callbacks
+    import sys
+    import anndata as ad
+
+    # Capture R console output
+    def console_to_stdout(x):
+        sys.stdout.write(x)
+        sys.stdout.flush()
+    callbacks.consolewrite_print = console_to_stdout
+    callbacks.consolewrite_warnerror = console_to_stdout
 
     tmp_dir = tempfile.mkdtemp()
-    tmp_h5mu = os.path.join(tmp_dir, "temp.h5mu")
     tmp_h5ad = os.path.join(tmp_dir, "temp.h5ad")
+    tmp_h5mu = os.path.join(tmp_dir, "temp.h5mu")
+    tmp_h5ad_rna = os.path.join(tmp_dir, "rna_tmp.h5ad")
+    tmp_h5ad_prot = os.path.join(tmp_dir, "prot_tmp.h5ad")
 
-    print("🔁 Converting Seurat object using R/MuDataSeurat...")
+    print(f"📁 Temporary directory: {tmp_dir}")
+    print("🔁 Converting Seurat object using R (MuDataSeurat / zellkonverter)...")
 
-    r(f'''
-        library(Seurat)
-        library(MuDataSeurat)
+    # R code block
+    r(f"""
+        suppressMessages(library(Seurat))
+        suppressMessages(library(MuDataSeurat))
+        suppressMessages(library(zellkonverter))
+        suppressMessages(library(SingleCellExperiment))
+        suppressMessages(library(SeuratDisk))
 
-        # Load Seurat object
-        if (grepl("\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
-            cat("Detected .rds file — reading via readRDS()\\n")
+        if (grepl("\\\\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
+            message("📦 Detected .rds file — reading via readRDS()")
             seurat_obj <- readRDS("{seurat_path}")
         }} else {{
-            cat("Detected .h5Seurat file — loading via LoadH5Seurat()\\n")
-            suppressMessages(library(SeuratDisk))
+            message("📦 Detected .h5Seurat file — loading via LoadH5Seurat()")
             seurat_obj <- LoadH5Seurat("{seurat_path}", verbose = FALSE)
         }}
 
         assays <- names(seurat_obj@assays)
-        cat("Detected assays:", assays, "\\n")
+        message(paste("🧬 Detected assays:", paste(assays, collapse = ", ")))
+        assay_classes <- sapply(seurat_obj@assays, class)
+        message(paste("🧩 Assay classes:", paste(unique(assay_classes), collapse = ", ")))
+
+        write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
+            message(paste("💾 Writing", filename))
+            sce <- as.SingleCellExperiment(obj)
+            zellkonverter::writeH5AD(sce, filename)
+        }}
 
         if (all(c("RNA", "ADT") %in% assays)) {{
-            cat("Detected multimodal Seurat object (RNA + ADT) — saving as .h5mu\\n")
-            # Rename ADT → prot before export for consistency with MuData convention
+            message("🔬 Multimodal (RNA + ADT) detected")
             names(seurat_obj@assays)[names(seurat_obj@assays) == "ADT"] <- "prot"
-            WriteH5MU(seurat_obj, "{tmp_h5mu}")
+            if (any(assay_classes == "Assay5")) {{
+                message("⚙️ Assay5 detected — exporting each modality via zellkonverter")
+                write_h5ad_safe(seurat_obj[["RNA"]], "{tmp_h5ad_rna}")
+                write_h5ad_safe(seurat_obj[["prot"]], "{tmp_h5ad_prot}")
+            }} else {{
+                message("✅ Using MuDataSeurat::WriteH5MU() for Seurat v4-style object")
+                MuDataSeurat::WriteH5MU(seurat_obj, "{tmp_h5mu}")
+            }}
         }} else if ("RNA" %in% assays) {{
-            cat("Single modality (RNA only) — saving as .h5ad\\n")
-            WriteH5AD(seurat_obj, "{tmp_h5ad}", assay = "RNA")
+            message("🧫 Single modality (RNA only)")
+            if (any(assay_classes == "Assay5")) {{
+                message("⚙️ Assay5 detected — exporting via zellkonverter")
+                write_h5ad_safe(seurat_obj, "{tmp_h5ad}")
+            }} else {{
+                message("✅ Using MuDataSeurat::WriteH5AD() for Seurat v4-style object")
+                MuDataSeurat::WriteH5AD(seurat_obj, "{tmp_h5ad}", assay = "RNA")
+            }}
         }} else {{
-            stop("Unsupported assay combination: only RNA or RNA+ADT supported.")
+            stop("❌ Unsupported assay combination: only RNA or RNA+ADT supported.")
         }}
-    ''')
+    """)
 
-    # Now load the correct file type in Python
+    # -----------------------------
+    # Back to Python: load and merge if multimodal
+    # -----------------------------
     if os.path.exists(tmp_h5mu):
         print("→ Loaded multimodal MuData (.h5mu)")
-        mdata = mu.read_h5mu(tmp_h5mu)
-        return mdata
+        mudata = mu.read_h5mu(tmp_h5mu)
+        return mudata
+
     elif os.path.exists(tmp_h5ad):
         print("→ Loaded single-modality AnnData (.h5ad)")
         adata = sc.read(tmp_h5ad)
         return adata
+
+    elif os.path.exists(tmp_h5ad_rna) and os.path.exists(tmp_h5ad_prot):
+        print("🔗 Merging RNA + Protein modalities into MuData (.h5mu)...")
+        rna = sc.read(tmp_h5ad_rna)
+        prot = sc.read(tmp_h5ad_prot)
+        mdata = mu.MuData({"rna": rna, "prot": prot})
+        print("✅ Created merged MuData object in memory.")
+        return mdata
+
     else:
-        raise FileNotFoundError("Conversion failed — no .h5mu or .h5ad file produced.")
+        raise FileNotFoundError("Conversion failed — no output file produced.")
 
 
 def merge_adatas(adatas):

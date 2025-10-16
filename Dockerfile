@@ -67,8 +67,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 # Optional: install seurat-disk from GitHub
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -e "remotes::install_github('mojaveazure/seurat-disk')" && \
-    R -e "devtools::install_github('PMBio/MuDataSeurat')"
-    
+    R -e "devtools::install_github('PMBio/MuDataSeurat')"      
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if ('Seurat' %in% rownames(installed.packages())) { \

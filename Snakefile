@@ -4,6 +4,10 @@ configfile: "config.yaml"
 
 import os
 ext = os.path.splitext(config["inputs"][0])[1] 
+# attention: currently does not work if input has seurat extension (.rds)! If seurat, output can be both .h5ad or .h5mu depending on modalities!!
+# if ext is .rds OR .h5seurat and config["multi_modal_seurat"] is true, then ext = .h5mu else ext = .h5ad, if ext is not .rds, keep ext as is
+ext = ".h5mu" if (ext in [".rds", ".h5seurat"] and config.get("multi_modal_seurat", False)) else (".h5ad" if ext in [".rds", ".h5seurat"] else ext)
+
 
 # ----------------------------
 # Rule: Load and merge input files

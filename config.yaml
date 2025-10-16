@@ -1,12 +1,20 @@
 ### `config.yaml`
 
 inputs:
-  - "data/demo_500_cells.h5ad"
-  - "data/demo_500_cells_2.h5ad"
+  #- "data/demo_500_cells.h5ad"
+  #- "data/demo_500_cells_2.h5ad"
+  #- "data/pbmc.rds"
+  - "data/pbmc_small.rds"
 use_gpu: false
-store_raw_counts: true
+multi_modaL_seurat: False # only read if input is seurat object (.rds)
+# if true, will read .rds as muon object with RNA and protein modality (ADT)
+# if false, will read .rds as anndata object with only RNA modality
+store_raw_counts: True
 
 preprocessing:
+  clustering: 
+    louvain: False
+    leiden: True
   params:
     min_genes: 100
     min_cells: 3

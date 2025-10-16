@@ -25,7 +25,7 @@ import muon as mu
 # ----------------------------
 # Helper: clustering
 # ----------------------------
-def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None):
+def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
     """
     Run Leiden and Louvain clustering for multiple resolutions.
 
@@ -44,16 +44,24 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None):
         Key of neighbors graph to use (e.g. "wnn" for multimodal)
     """
     is_mudata = hasattr(obj, "mod")
+    
+    clustering_cfg = cfg["clustering"]
+    run_leiden = clustering_cfg.get("leiden", True)
+    run_louvain = clustering_cfg.get("louvain", True)
 
     # Select backend
     if use_gpu:
         import rapids_singlecell as rsc
-        leiden_func = rsc.tl.leiden
-        louvain_func = rsc.tl.louvain
+        if run_leiden:
+            leiden_func = rsc.tl.leiden
+        if run_louvain:
+            louvain_func = rsc.tl.louvain
         backend = "⚡ RAPIDS (GPU)"
     else:
-        leiden_func = sc.tl.leiden
-        louvain_func = sc.tl.louvain
+        if run_leiden:
+            leiden_func = sc.tl.leiden
+        if run_louvain:
+            louvain_func = sc.tl.louvain
         backend = "🧠 Scanpy (CPU)"
 
     print(f"→ Running clustering with {backend}")
@@ -61,18 +69,20 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None):
         print(f"   Using multimodal neighbors graph: '{wnn_key}'")
 
     for res in resolutions:
-        leiden_func(
-            obj,
-            resolution=res, flavor="igraph", n_iterations=2, directed = False, 
-            key_added=f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
-            neighbors_key=wnn_key,
-        )
-        louvain_func(
-            obj,
-            resolution=res,
-            key_added=f"louvain_{res}" if not wnn_key else f"louvain_{res}_{wnn_key}",
-            neighbors_key=wnn_key,
-        )
+        if run_leiden:
+            leiden_func(
+                obj,
+                resolution=res, flavor="igraph", n_iterations=2, directed = False, 
+                key_added=f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
+                neighbors_key=wnn_key,
+            )
+        if run_louvain:    
+            louvain_func(
+                obj,
+                resolution=res,
+                key_added=f"louvain_{res}" if not wnn_key else f"louvain_{res}_{wnn_key}",
+                neighbors_key=wnn_key,
+            )
 
 
 # ----------------------------
@@ -113,7 +123,7 @@ def filter_qc(adata, cfg):
     # Neighborhood graph, UMAP, clustering
     sc.pp.neighbors(adata, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs"])
     sc.tl.umap(adata, n_components=p["umap_n_components"])
-    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0])
+    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], cfg=cfg)
     return adata
 
 
