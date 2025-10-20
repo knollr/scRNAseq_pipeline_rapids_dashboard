@@ -16,7 +16,7 @@ Features:
 - Configurable storage of raw counts (adata.layers["counts"])
 - Compatible with Snakemake and CLI
 """
-
+#import scripts.silence_warnings
 import argparse
 import yaml
 import scanpy as sc
@@ -64,24 +64,30 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
             louvain_func = sc.tl.louvain
         backend = "🧠 Scanpy (CPU)"
 
-    print(f"→ Running clustering with {backend}")
+    print(f"🏃 Running clustering with {backend}")
     if is_mudata and wnn_key:
-        print(f"   Using multimodal neighbors graph: '{wnn_key}'")
+        print(f"🧬 Using multimodal neighbors graph: '{wnn_key}'")
 
     for res in resolutions:
         if run_leiden:
-            leiden_func(
-                obj,
-                resolution=res, flavor="igraph", n_iterations=2, directed = False, 
-                key_added=f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
-                neighbors_key=wnn_key,
-            )
+            kwargs = {
+                "resolution": res,
+                "n_iterations": 2,
+                "key_added": f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
+                "neighbors_key": wnn_key
+            }
+
+            if not use_gpu:
+                kwargs["flavor"] = "igraph"  # only for CPU, does not work with rsc
+                kwargs["directed"] = False
+            leiden_func(obj, **kwargs)
+
         if run_louvain:    
             louvain_func(
                 obj,
                 resolution=res,
                 key_added=f"louvain_{res}" if not wnn_key else f"louvain_{res}_{wnn_key}",
-                neighbors_key=wnn_key,
+                neighbors_key=wnn_key
             )
 
 
@@ -116,7 +122,7 @@ def filter_qc(adata, cfg):
     # Normalization and feature selection
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
-    sc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"], subset=True)
+    sc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
     sc.pp.scale(adata, max_value=10)
     sc.tl.pca(adata, n_comps=p["n_pcs"])
 
@@ -155,12 +161,12 @@ def run_gpu_pipeline(adata, cfg):
 
     rsc.pp.normalize_total(adata, target_sum=1e4)
     rsc.pp.log1p(adata)
-    rsc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"], subset=True)
+    rsc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
     rsc.pp.scale(adata)
     rsc.tl.pca(adata, n_comps=p["n_pcs"])
     rsc.pp.neighbors(adata, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs"])
     rsc.tl.umap(adata)
-    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=True)
+    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=True, cfg=cfg)
     rsc.get.anndata_to_CPU(adata)
     return adata
 
@@ -183,48 +189,47 @@ def preprocess_mdata(mdata, cfg):
     # RNA modality
     print("🧬 Preprocessing RNA modality...")
     if use_gpu:
-        mdata["rna"] = run_gpu_pipeline(mdata["rna"], cfg)
+        mdata.mod["rna"] = run_gpu_pipeline(mdata.mod["rna"], cfg)
     else:
-        mdata["rna"] = run_cpu_pipeline(mdata["rna"], cfg)
+        mdata.mod["rna"] = run_cpu_pipeline(mdata.mod["rna"], cfg)
     mdata.update()
 
     # Protein modality
     if "prot" in mdata.mod:
         from muon import prot as pt
         print("💧 Preprocessing protein modality (CLR normalization)...")
-        prot = mdata["prot"]
+        prot = mdata.mod["prot"]
+        prot.X = prot.X.astype("float64")
         pt.pp.clr(prot)
         sc.pp.scale(prot, max_value=10)
-        sc.tl.pca(prot, use_highly_variable=False, n_comps=p["n_pcs_prot"])
-        sc.pp.neighbors(prot, n_neighbors=p["neighbors_n_neighbors"], n_pcs=p["n_pcs_prot"])
-        mdata["prot"] = prot
+        sc.tl.pca(prot, mask_var=None, n_comps=p["n_pcs_prot"])
+        sc.pp.neighbors(prot, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs_prot"])
+        mdata.mod["prot"] = prot
 
     # Weighted Nearest Neighbor integration
     print("🔗 Computing WNN multimodal integration...")
-    mu.tl.wnn(
-        mdata,
-        modalities=["rna", "prot"] if "prot" in mdata.mod else ["rna"],
-        rna_obsm="X_pca",
-        prot_obsm="X_pca" if "prot" in mdata.mod else None,
-        n_neighbors=p["neighbors_n_neighbors"]
-    )
-
+    
+    mu.pp.neighbors(
+        mdata, 
+        key_added="wnn",  # name of the WNN graph in mdata.obsp
+        add_weights_to_modalities=True  # optional: add modality weights to each modality
+    )   
+    
     # UMAP and clustering on WNN
-    print("📉 Running UMAP + clustering on WNN graph...")
+    print("🏃 Running UMAP + clustering on WNN graph...")
     if use_gpu:
         mu.tl.umap(mdata, neighbors_key="wnn", method="rapids")
     else:
         mu.tl.umap(mdata, neighbors_key="wnn")
 
-    run_clusterings(mdata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=use_gpu, wnn_key="wnn")
+    run_clusterings(mdata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=use_gpu, wnn_key="wnn", cfg=cfg)
     return mdata
 
 
 # ----------------------------
 # Main entry
 # ----------------------------
-def main(input_file, output_file, cfg):
-    use_gpu = cfg.get("use_gpu", False)
+def main(input_file, output_file, cfg, use_gpu):
 
     if input_file.endswith(".h5mu"):
         mdata = mu.read_h5mu(input_file)
@@ -251,6 +256,7 @@ if __name__ == "__main__":
         input_file = snakemake.input[0]
         output_file = snakemake.output[0]
         cfg = snakemake.params.config  # already a dict
+        use_gpu = snakemake.params.use_gpu
     except NameError:
         # CLI execution
         ap = argparse.ArgumentParser(description="QC + preprocessing for single-cell datasets")
@@ -262,4 +268,4 @@ if __name__ == "__main__":
             cfg = yaml.safe_load(f)
         input_file, output_file = args.input, args.output
 
-    main(input_file, output_file, cfg)
+    main(input_file, output_file, cfg, use_gpu)

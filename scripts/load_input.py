@@ -9,13 +9,15 @@ Supports:
 - .rds/.h5Seurat : Seurat object (converted via SeuratDisk)
 - .h5mu       : MuData (multi-modal)
 """
+#import scripts.silence_warnings
 
-import scanpy as sc
-import muon as mu
 import os
 import sys
+import scanpy as sc
+import muon as mu
 from pathlib import Path
 import argparse
+import anndata as ad
 
 # ----------------------------
 # Functions
@@ -32,25 +34,25 @@ def load_single_file(filepath: str):
 
     if ext == ".h5ad":
         adata = sc.read(filepath)
-        print("→ Loaded AnnData (.h5ad).")
+        print("📂 Loaded AnnData (.h5ad).")
         adata.obs["source_file"] = os.path.basename(filepath)
         return adata
 
     elif ext == ".mtx":
         folder = os.path.dirname(filepath)
         adata = sc.read_10x_mtx(folder, var_names="gene_symbols", cache=True)
-        print("→ Loaded 10X matrix (.mtx).")
+        print("📂 Loaded 10X matrix (.mtx).")
         adata.obs["source_file"] = os.path.basename(filepath)
         return adata
 
     elif ext in [".rds", ".h5seurat"]:
         obj = convert_seurat_to_adata(filepath)
         if hasattr(obj, "mod"):
-            print("→ Converted Seurat multimodal object to MuData.")
+            print("🔁 Converted Seurat multimodal object to MuData.")
             for mod in obj.mod.values():
                 mod.obs["source_file"] = os.path.basename(filepath)
         else:
-            print("→ Converted Seurat single-modality object to AnnData.")
+            print("🔁 Converted Seurat single-modality object to AnnData.")
             obj.obs["source_file"] = os.path.basename(filepath)
         return obj
 
@@ -58,7 +60,7 @@ def load_single_file(filepath: str):
         mdata = mu.read_h5mu(filepath)
         modalities = list(mdata.mod.keys())
         multimodal = "rna" in modalities and "prot" in modalities
-        print(f"→ Loaded MuData (.h5mu) with modalities: {modalities}")
+        print(f"📂 Loaded MuData (.h5mu) with modalities: {modalities}")
         if multimodal:
             print("✅ Detected multimodal data: RNA + Protein.")
         else:
@@ -110,17 +112,25 @@ def convert_seurat_to_adata(seurat_path: str):
         suppressMessages(library(zellkonverter))
         suppressMessages(library(SingleCellExperiment))
         suppressMessages(library(SeuratDisk))
+        suppressMessages(library(reticulate))
+                
+        #use_python(Sys.getenv("RETICULATE_PYTHON"), required = TRUE)
+        
+        ## careful, add at end of dockerfile
+        # ENV BASILISK_USE_SYSTEM_DIR=1
+        # ENV BASILISK_EXTERNAL_CONDA=1
+        # ENV RETICULATE_PYTHON=/opt/conda/envs/pipeline/bin/python
 
-        if (grepl("\\\\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
-            message("📦 Detected .rds file — reading via readRDS()")
+        if (grepl("\\\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
+            message("🔍 Detected .rds file — reading via readRDS()")
             seurat_obj <- readRDS("{seurat_path}")
         }} else {{
-            message("📦 Detected .h5Seurat file — loading via LoadH5Seurat()")
+            message("🔍 Detected .h5Seurat file — loading via LoadH5Seurat()")
             seurat_obj <- LoadH5Seurat("{seurat_path}", verbose = FALSE)
         }}
 
         assays <- names(seurat_obj@assays)
-        message(paste("🧬 Detected assays:", paste(assays, collapse = ", ")))
+        message(paste("🔍 Detected assays:", paste(assays, collapse = ", ")))
         assay_classes <- sapply(seurat_obj@assays, class)
         message(paste("🧩 Assay classes:", paste(unique(assay_classes), collapse = ", ")))
 
@@ -129,12 +139,33 @@ def convert_seurat_to_adata(seurat_path: str):
             sce <- as.SingleCellExperiment(obj)
             zellkonverter::writeH5AD(sce, filename)
         }}
+        
+        # write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
+        #     message(paste("💾 Writing", filename, "via reticulate + anndata"))
+        #     sce <- as.SingleCellExperiment(obj)
+        #     ad <- import("anndata")
+        #     np <- import("numpy")
+        #     pd <- import("pandas")
+
+        #     # Extract matrix and metadata
+        #     X <- assay(sce)
+        #     obs <- as.data.frame(colData(sce))
+        #     var <- as.data.frame(rowData(sce))
+
+        #     # Convert to numpy arrays / DataFrames
+        #     adata <- ad$AnnData(
+        #         X = np$array(X),
+        #         obs = pd$DataFrame(obs),
+        #         var = pd$DataFrame(var)
+        #     )
+        #     adata$write_h5ad(filename)
+        # }}
 
         if (all(c("RNA", "ADT") %in% assays)) {{
-            message("🔬 Multimodal (RNA + ADT) detected")
+            message("🔬🔍 Multimodal (RNA + ADT) detected")
             names(seurat_obj@assays)[names(seurat_obj@assays) == "ADT"] <- "prot"
             if (any(assay_classes == "Assay5")) {{
-                message("⚙️ Assay5 detected — exporting each modality via zellkonverter")
+                message("⚙️🔍 Assay5 detected — exporting each modality via zellkonverter")
                 write_h5ad_safe(seurat_obj[["RNA"]], "{tmp_h5ad_rna}")
                 write_h5ad_safe(seurat_obj[["prot"]], "{tmp_h5ad_prot}")
             }} else {{
@@ -142,9 +173,9 @@ def convert_seurat_to_adata(seurat_path: str):
                 MuDataSeurat::WriteH5MU(seurat_obj, "{tmp_h5mu}")
             }}
         }} else if ("RNA" %in% assays) {{
-            message("🧫 Single modality (RNA only)")
+            message("🧬🔍 single modality (RNA only) detected")
             if (any(assay_classes == "Assay5")) {{
-                message("⚙️ Assay5 detected — exporting via zellkonverter")
+                message("⚙️🔍 Assay5 detected — exporting via zellkonverter")
                 write_h5ad_safe(seurat_obj, "{tmp_h5ad}")
             }} else {{
                 message("✅ Using MuDataSeurat::WriteH5AD() for Seurat v4-style object")
@@ -159,13 +190,20 @@ def convert_seurat_to_adata(seurat_path: str):
     # Back to Python: load and merge if multimodal
     # -----------------------------
     if os.path.exists(tmp_h5mu):
-        print("→ Loaded multimodal MuData (.h5mu)")
-        mudata = mu.read_h5mu(tmp_h5mu)
-        return mudata
+        print("📂 Loaded multimodal MuData (.h5mu)")
+        mdata = mu.read_h5mu(tmp_h5mu)
+
+        for key in list(mdata.mod.keys()):  # use list() to avoid runtime dict size change
+            new_key = key.lower()
+            if new_key != key:
+                mdata.mod[new_key] = mdata.mod.pop(key)
+        print("✅ Created MuData object.")
+        return mdata
 
     elif os.path.exists(tmp_h5ad):
-        print("→ Loaded single-modality AnnData (.h5ad)")
+        print("📂 Loaded single-modality AnnData (.h5ad)")
         adata = sc.read(tmp_h5ad)
+        print("✅ Created AnnData object.")
         return adata
 
     elif os.path.exists(tmp_h5ad_rna) and os.path.exists(tmp_h5ad_prot):
@@ -177,7 +215,7 @@ def convert_seurat_to_adata(seurat_path: str):
         return mdata
 
     else:
-        raise FileNotFoundError("Conversion failed — no output file produced.")
+        raise FileNotFoundError("❌Conversion failed — no output file produced.")
 
 
 def merge_adatas(adatas):
@@ -194,12 +232,12 @@ def merge_adatas(adatas):
         merged = merge_mudatas(adatas)
         return merged
 
-    print(f"🧬 Merging {len(adatas)} AnnData objects...")
-    merged = adatas[0].concatenate(
-        *adatas[1:],
+    print(f"🔗 Merging {len(adatas)} AnnData objects...")
+    merged = ad.concat(
+        adatas,
         join="outer",
-        batch_key="batch",
-        batch_categories=[f"sample_{i+1}" for i in range(len(adatas))]
+        label="batch",
+        keys=[f"sample_{i+1}" for i in range(len(adatas))]
     )
     print(f"✅ Merged AnnData: {merged.n_obs} cells × {merged.n_vars} genes")
     return merged
@@ -216,8 +254,8 @@ def merge_mudatas(mdatas):
 
     merged_mods = {}
     for mod in all_modalities:
-        print(f"🔹 Merging modality: {mod}")
-        adatas = [m.mod[mod] for m in mdatas if mod in m.mod]
+        print(f"🔗 Merging modality: {mod}")
+        adatas = [m.mod[mod] for m in mdatas if mod in m.mod and not hasattr(m.mod[mod], "mod")]
         merged_mods[mod] = merge_adatas(adatas)
 
     merged_mdata = mu.MuData(merged_mods)

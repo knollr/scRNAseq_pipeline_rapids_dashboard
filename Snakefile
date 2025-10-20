@@ -1,13 +1,35 @@
 # Snakefile
 
+import os
+from datetime import datetime
+import pathlib
+
 configfile: "config.yaml"
 
-import os
-ext = os.path.splitext(config["inputs"][0])[1] 
-# attention: currently does not work if input has seurat extension (.rds)! If seurat, output can be both .h5ad or .h5mu depending on modalities!!
-# if ext is .rds OR .h5seurat and config["multi_modal_seurat"] is true, then ext = .h5mu else ext = .h5ad, if ext is not .rds, keep ext as is
-ext = ".h5mu" if (ext in [".rds", ".h5seurat"] and config.get("multi_modal_seurat", False)) else (".h5ad" if ext in [".rds", ".h5seurat"] else ext)
 
+# ----------------------------
+# Setup: timestamped results folder
+# ----------------------------
+run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+results_dir = f"results/run_{run_id}"
+os.makedirs(results_dir, exist_ok=True)
+
+# Create or update symlink to latest run
+latest_symlink = "results/latest"
+if os.path.islink(latest_symlink) or os.path.exists(latest_symlink):
+    os.remove(latest_symlink)
+# Use absolute paths for cross-directory robustness
+os.symlink(os.path.abspath(results_dir), latest_symlink)
+
+# ----------------------------
+# Detect file extension for output type
+# ----------------------------
+ext = os.path.splitext(config["inputs"][0])[1]
+ext = (
+    ".h5mu"
+    if (ext in [".rds", ".h5seurat"] and config.get("multi_modal_seurat", False))
+    else (".h5ad" if ext in [".rds", ".h5seurat"] else ext)
+)
 
 # ----------------------------
 # Rule: Load and merge input files
@@ -20,10 +42,9 @@ rule load_input:
     input:
         config["inputs"]
     output:
-        f"results/merged{ext}"
+        f"{results_dir}/merged{ext}"
     script:
         "scripts/load_input.py"
-        #shell("python scripts/load_input.py --input {input} --output {output}")
 
 # ----------------------------
 # Rule: QC and preprocessing
@@ -34,14 +55,14 @@ rule preprocess:
     on the merged dataset.
     """
     input:
-        f"results/merged{ext}"
+        f"{results_dir}/merged{ext}"
     output:
-        f"results/merged_preprocessed{ext}"
+        f"{results_dir}/merged_preprocessed{ext}"
     params:
-        config=config["preprocessing"]
+        config=config["preprocessing"],
+        use_gpu=config.get("use_gpu", False)
     script:
         "scripts/qc_and_preproc.py"
-
 
 # ----------------------------
 # Rule: all
@@ -51,4 +72,4 @@ rule all:
     Final target: single preprocessed dataset (h5ad or h5mu)
     """
     input:
-        f"results/merged_preprocessed{ext}"
+        f"{results_dir}/merged_preprocessed{ext}"
