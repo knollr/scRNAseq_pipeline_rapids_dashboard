@@ -69,10 +69,10 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -e "remotes::install_github('mojaveazure/seurat-disk')" && \
     R -e "devtools::install_github('PMBio/MuDataSeurat')"      
 
-# Install Bioconductor packages: zellkonverter + SingleCellExperiment
+# Install Bioconductor packages
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); \
-             BiocManager::install(c('zellkonverter', 'SingleCellExperiment'), ask=FALSE, update=F)"
+             BiocManager::install(c('zellkonverter', 'SingleCellExperiment', 'scCustomize', 'hdf5r'), ask=FALSE, update=F)"
 
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
