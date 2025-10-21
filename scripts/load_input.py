@@ -109,18 +109,9 @@ def convert_seurat_to_adata(seurat_path: str):
     r(f"""
         suppressMessages(library(Seurat))
         suppressMessages(library(MuDataSeurat))
-        suppressMessages(library(zellkonverter))
         suppressMessages(library(SingleCellExperiment))
         suppressMessages(library(SeuratDisk))
-        suppressMessages(library(reticulate))
-                
-        #use_python(Sys.getenv("RETICULATE_PYTHON"), required = TRUE)
-        
-        ## careful, add at end of dockerfile
-        # ENV BASILISK_USE_SYSTEM_DIR=1
-        # ENV BASILISK_EXTERNAL_CONDA=1
-        # ENV RETICULATE_PYTHON=/opt/conda/envs/pipeline/bin/python
-
+              
         if (grepl("\\\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
             message("🔍 Detected .rds file — reading via readRDS()")
             seurat_obj <- readRDS("{seurat_path}")
@@ -135,31 +126,14 @@ def convert_seurat_to_adata(seurat_path: str):
         message(paste("🧩 Assay classes:", paste(unique(assay_classes), collapse = ", ")))
 
         write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
-            message(paste("💾 Writing", filename))
-            sce <- as.SingleCellExperiment(obj)
-            zellkonverter::writeH5AD(sce, filename)
+            suppressMessages(library(SeuratDisk))
+            message(paste("💾 Writing", filename, "via SeuratDisk::Convert()"))
+
+            tmp_h5seurat <- tempfile(fileext = ".h5Seurat")
+            SaveH5Seurat(obj, filename = tmp_h5seurat, overwrite = TRUE)
+            Convert(tmp_h5seurat, dest = "h5ad", filename = filename, overwrite = TRUE)
         }}
         
-        # write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
-        #     message(paste("💾 Writing", filename, "via reticulate + anndata"))
-        #     sce <- as.SingleCellExperiment(obj)
-        #     ad <- import("anndata")
-        #     np <- import("numpy")
-        #     pd <- import("pandas")
-
-        #     # Extract matrix and metadata
-        #     X <- assay(sce)
-        #     obs <- as.data.frame(colData(sce))
-        #     var <- as.data.frame(rowData(sce))
-
-        #     # Convert to numpy arrays / DataFrames
-        #     adata <- ad$AnnData(
-        #         X = np$array(X),
-        #         obs = pd$DataFrame(obs),
-        #         var = pd$DataFrame(var)
-        #     )
-        #     adata$write_h5ad(filename)
-        # }}
 
         if (all(c("RNA", "ADT") %in% assays)) {{
             message("🔬🔍 Multimodal (RNA + ADT) detected")
