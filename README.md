@@ -7,7 +7,7 @@ A **fast, GPU-accelerated single-cell RNA-seq & multi-omics analysis pipeline** 
 - 🔄 **Seamless data conversion**: Seurat (`.rds` / `.h5Seurat`) → AnnData / MuData
 - 🔗 **Merging of multiple datasets** for integrated analysis  
 - 🔬 **Multi-omics support**: RNA and protein (CITE/ADT)
-- 🧪 **Automated cell type annotation**: Cell type annotation using CellTypist (planned)  
+- 🧪 **Automated cell type annotation**: Cell type annotation using CellTypist 
 - 📊 **Interactive dashboard** for visual exploration and QC (planned)  
 - 🧩 Modular **Snakemake workflow** for reproducibility  
 

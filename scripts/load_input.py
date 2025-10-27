@@ -103,7 +103,7 @@ def convert_seurat_to_adata(seurat_path: str):
     tmp_h5ad_prot = os.path.join(tmp_dir, "prot_tmp.h5ad")
 
     print(f"📁 Temporary directory: {tmp_dir}")
-    print("🔁 Converting Seurat object using R (MuDataSeurat / zellkonverter)...")
+    print("🔁 Converting Seurat object using R (MuDataSeurat / scCustomize)...")
 
     # R code block
     r(f"""
@@ -111,7 +111,7 @@ def convert_seurat_to_adata(seurat_path: str):
         suppressMessages(library(MuDataSeurat))
         suppressMessages(library(SingleCellExperiment))
         suppressMessages(library(SeuratDisk))
-              
+
         if (grepl("\\\\.rds$", "{seurat_path}", ignore.case = TRUE)) {{
             message("🔍 Detected .rds file — reading via readRDS()")
             seurat_obj <- readRDS("{seurat_path}")
@@ -125,23 +125,25 @@ def convert_seurat_to_adata(seurat_path: str):
         assay_classes <- sapply(seurat_obj@assays, class)
         message(paste("🧩 Assay classes:", paste(unique(assay_classes), collapse = ", ")))
 
-        write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
-            suppressMessages(library(SeuratDisk))
-            message(paste("💾 Writing", filename, "via SeuratDisk::Convert()"))
+        # write_h5ad_safe <- function(obj, filename, assay = "RNA") {{
+        #     message(paste("💾 Writing", filename, "via SeuratDisk::Convert()"))
 
-            tmp_h5seurat <- tempfile(fileext = ".h5Seurat")
-            SaveH5Seurat(obj, filename = tmp_h5seurat, overwrite = TRUE)
-            Convert(tmp_h5seurat, dest = "h5ad", filename = filename, overwrite = TRUE)
-        }}
+        #     tmp_h5seurat <- tempfile(fileext = ".h5Seurat")
+        #     SaveH5Seurat(obj, filename = tmp_h5seurat, overwrite = TRUE)
+        #     Convert(tmp_h5seurat, dest = "h5ad", filename = filename, overwrite = TRUE)
+        # }}
         
 
         if (all(c("RNA", "ADT") %in% assays)) {{
             message("🔬🔍 Multimodal (RNA + ADT) detected")
             names(seurat_obj@assays)[names(seurat_obj@assays) == "ADT"] <- "prot"
             if (any(assay_classes == "Assay5")) {{
-                message("⚙️🔍 Assay5 detected — exporting each modality via zellkonverter")
-                write_h5ad_safe(seurat_obj[["RNA"]], "{tmp_h5ad_rna}")
-                write_h5ad_safe(seurat_obj[["prot"]], "{tmp_h5ad_prot}")
+                message("⚙️🔍 Assay5 detected — converting each modality via scCustomize")
+                seurat_obj <- scCustomize::Convert_Assay(seurat_object = seurat_obj, convert_to = "V3")
+                MuDataSeurat::WriteH5MU(seurat_obj, "{tmp_h5mu}")
+                                
+                #write_h5ad_safe(seurat_obj[["RNA"]], "{tmp_h5ad_rna}")
+                #write_h5ad_safe(seurat_obj[["prot"]], "{tmp_h5ad_prot}")
             }} else {{
                 message("✅ Using MuDataSeurat::WriteH5MU() for Seurat v4-style object")
                 MuDataSeurat::WriteH5MU(seurat_obj, "{tmp_h5mu}")
@@ -149,8 +151,10 @@ def convert_seurat_to_adata(seurat_path: str):
         }} else if ("RNA" %in% assays) {{
             message("🧬🔍 single modality (RNA only) detected")
             if (any(assay_classes == "Assay5")) {{
-                message("⚙️🔍 Assay5 detected — exporting via zellkonverter")
-                write_h5ad_safe(seurat_obj, "{tmp_h5ad}")
+                message("⚙️🔍 Assay5 detected — converting via scCustomize")
+                seurat_obj <- scCustomize::Convert_Assay(seurat_object = seurat_obj, convert_to = "V3")
+                MuDataSeurat::WriteH5AD(seurat_obj, "{tmp_h5ad}", assay = "RNA")
+                #write_h5ad_safe(seurat_obj, "{tmp_h5ad}")
             }} else {{
                 message("✅ Using MuDataSeurat::WriteH5AD() for Seurat v4-style object")
                 MuDataSeurat::WriteH5AD(seurat_obj, "{tmp_h5ad}", assay = "RNA")

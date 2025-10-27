@@ -65,6 +65,26 @@ rule preprocess:
         "scripts/qc_and_preproc.py"
 
 # ----------------------------
+# Rule: automated cell type annotation using CellTypist
+# ----------------------------
+rule celltypist_annotation:
+    """
+    Annotate cell types using CellTypist on the preprocessed dataset.
+    Works for both single- and multi-modal inputs (.h5ad / .h5mu).
+    Downloads CellTypist reference models once and reuses them.
+    """
+    input:
+        f"{results_dir}/merged_preprocessed{ext}"
+    output:
+        f"{results_dir}/merged_annotated{ext}"
+    params:
+        config=config["celltypist"],
+        use_gpu=config.get("use_gpu", False),
+        model_dir="resources/celltypist_models"  
+    script:
+        "scripts/celltypist_annotation.py"
+
+# ----------------------------
 # Rule: all
 # ----------------------------
 rule all:
@@ -72,4 +92,4 @@ rule all:
     Final target: single preprocessed dataset (h5ad or h5mu)
     """
     input:
-        f"{results_dir}/merged_preprocessed{ext}"
+        f"{results_dir}/merged_annotated{ext}"

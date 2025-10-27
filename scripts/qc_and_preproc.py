@@ -21,6 +21,9 @@ import argparse
 import yaml
 import scanpy as sc
 import muon as mu
+import numpy as np
+import scipy.sparse as sp
+
 
 # ----------------------------
 # Helper: clustering
@@ -122,6 +125,58 @@ def filter_qc(adata, cfg):
     # Normalization and feature selection
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
+            
+    print("🧹 Robust cleanup (CPU): handling sparse/dense/masked inputs...")
+
+    # Case A: sparse matrix (Scipy)
+    if sp.issparse(adata.X):
+        # ensure float dtype in data array
+        if not np.issubdtype(adata.X.data.dtype, np.floating):
+            adata.X.data = adata.X.data.astype(np.float64)
+        # Replace NaNs/Infs in the sparse data array
+        if np.isnan(adata.X.data).any() or np.isinf(adata.X.data).any():
+            print("⚠️ NaNs/Infs detected in sparse .X.data → replacing with 0")
+            adata.X.data = np.nan_to_num(adata.X.data, nan=0.0, posinf=0.0, neginf=0.0)
+        # Remove all-zero genes (columns)
+        gene_counts = np.asarray(adata.X.sum(axis=0)).ravel()
+        nonzero_genes = gene_counts > 0
+        if not nonzero_genes.all():
+            n_removed = (~nonzero_genes).sum()
+            print(f"🧬 Removing {n_removed} all-zero genes (sparse)")
+            adata = adata[:, nonzero_genes].copy()
+
+    # Case B: dense / masked / array-like
+    else:
+        # coerce to numpy array (handles pandas-backed, masked arrays, etc.)
+        X = np.asarray(adata.X)
+
+        # If masked array, fill with 0
+        if np.ma.isMaskedArray(X):
+            X = X.filled(0.0)
+
+        # Ensure floating dtype
+        if not np.issubdtype(X.dtype, np.floating):
+            X = X.astype(np.float64)
+        else:
+            X = X.astype(np.float64, copy=False)
+
+        # Replace NaN / Inf if present
+        if np.isnan(X).any() or np.isinf(X).any():
+            print("⚠️ NaNs/Infs detected in dense .X → replacing with 0")
+            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Remove all-zero genes (columns)
+        gene_counts = (X > 0).sum(axis=0)
+        nonzero_genes = gene_counts > 0
+        if not nonzero_genes.all():
+            n_removed = (~nonzero_genes).sum()
+            print(f"🧬 Removing {n_removed} all-zero genes (dense)")
+            adata = adata[:, nonzero_genes].copy()
+        else:
+            adata.X = X  # write cleaned dense matrix back  
+            
+    adata.layers["norm_data"] = adata.X.copy()
+    
     sc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
     sc.pp.scale(adata, max_value=10)
     sc.tl.pca(adata, n_comps=p["n_pcs"])
@@ -146,9 +201,17 @@ def run_gpu_pipeline(adata, cfg):
     GPU-accelerated preprocessing using rapids-singlecell.
     """
     import rapids_singlecell as rsc
+    from cupyx.scipy.sparse import issparse
+    import cupy as cp
 
     p = cfg["params"]
     print("⚡ Running GPU-based preprocessing with rapids-singlecell...")
+
+    # Ensure .X is float32 (compatible with CuPy)
+    if sp.issparse(adata.X):
+        adata.X = adata.X.astype(np.float32)
+    else:
+        adata.X = np.array(adata.X, dtype=np.float32)
 
     rsc.get.anndata_to_GPU(adata)
     rsc.pp.filter_cells(adata, min_genes=p["min_genes"])
@@ -161,20 +224,51 @@ def run_gpu_pipeline(adata, cfg):
 
     rsc.pp.normalize_total(adata, target_sum=1e4)
     rsc.pp.log1p(adata)
+    
+    # Remove NaN or invalid values directly on GPU
+    print("🧹 Checking for NaN or empty features (GPU mode)...")
+    # Detect and replace NaNs / infinities 
+    if issparse(adata.X):
+        # Only operate on the stored data
+        if cp.isnan(adata.X.data).any():
+            print("⚠️ NaNs detected → replacing with 0")
+            adata.X.data = cp.nan_to_num(
+                adata.X.data, nan=0.0, posinf=0.0, neginf=0.0
+            )
+    else:
+        if cp.isnan(adata.X).any():
+            print("⚠️ NaNs detected → replacing with 0")
+            adata.X = cp.nan_to_num(
+                adata.X, nan=0.0, posinf=0.0, neginf=0.0
+            )
+    # Remove all-zero genes (columns) 
+    if issparse(adata.X):
+        # Count non-zero entries per column
+        X_pos = (adata.X > 0).astype(cp.float32)  # <-- important!
+        nonzero_genes = cp.array(X_pos.sum(axis=0)).ravel() > 0
+    else:
+        nonzero_genes = cp.array((adata.X > 0).sum(axis=0)).ravel() > 0
+    if not nonzero_genes.all():
+        print(f"🧬 Removing {(~nonzero_genes).sum()} all-zero genes")
+        # Indexing works with sparse or dense matrices
+        adata = adata[:, cp.asnumpy(nonzero_genes)].copy()
+        
+    adata.layers["norm_data"] = adata.X.copy()    
     rsc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
     rsc.pp.scale(adata)
     rsc.tl.pca(adata, n_comps=p["n_pcs"])
     rsc.pp.neighbors(adata, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs"])
     rsc.tl.umap(adata)
     run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=True, cfg=cfg)
-    rsc.get.anndata_to_CPU(adata)
+    rsc.get.anndata_to_CPU(adata, convert_all = True)
+    
     return adata
 
 
 # ----------------------------
 # Multimodal preprocessing
 # ----------------------------
-def preprocess_mdata(mdata, cfg):
+def preprocess_mdata(mdata, cfg, use_gpu):
     """
     Preprocess MuData object (RNA + protein multimodal).
 
@@ -184,7 +278,6 @@ def preprocess_mdata(mdata, cfg):
     - UMAP and clustering on WNN representation
     """
     p = cfg["params"]
-    use_gpu = cfg.get("use_gpu", False)
 
     # RNA modality
     print("🧬 Preprocessing RNA modality...")
@@ -192,6 +285,9 @@ def preprocess_mdata(mdata, cfg):
         mdata.mod["rna"] = run_gpu_pipeline(mdata.mod["rna"], cfg)
     else:
         mdata.mod["rna"] = run_cpu_pipeline(mdata.mod["rna"], cfg)
+
+    remaining_cells = mdata.mod['rna'].obs_names
+    mdata.mod['prot'] = mdata.mod['prot'][remaining_cells, :].copy()
     mdata.update()
 
     # Protein modality
@@ -233,7 +329,7 @@ def main(input_file, output_file, cfg, use_gpu):
 
     if input_file.endswith(".h5mu"):
         mdata = mu.read_h5mu(input_file)
-        mdata = preprocess_mdata(mdata, cfg)
+        mdata = preprocess_mdata(mdata, cfg, use_gpu)
         mdata.write_h5mu(output_file)
         print(f"✅ Multimodal preprocessing finished → {output_file}")
 

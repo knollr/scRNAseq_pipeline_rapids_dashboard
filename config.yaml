@@ -2,7 +2,7 @@
 
 inputs:
   - "data/demo_500_cells.h5ad"
-  - "data/demo_500_cells_2.h5ad"
+  #- "data/demo_500_cells_2.h5ad"
   #- "data/pbmc.rds"
   #- "data/pbmc_small.rds"
   #- "data/Rhapsody.h5mu"
@@ -21,10 +21,19 @@ preprocessing:
     louvain: True
     leiden: True
   params:
-    min_genes: 100
-    min_cells: 3
+    min_genes: 300
+    min_cells: 5
     n_top_genes: 2000
     n_pcs: 20
     n_pcs_prot: 10
     n_neighbors: 15
     umap_n_components: 2
+
+celltypist:
+  models:
+    - "Immune_All_High.pkl"
+    - "Adult_COVID19_PBMC.pkl"
+    - "COVID19_Immune_Landscape.pkl"
+    - "Healthy_COVID19_PBMC.pkl"
+  majority_voting: true
+  force_update: false
