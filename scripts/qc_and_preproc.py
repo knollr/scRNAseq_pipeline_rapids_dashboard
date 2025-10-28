@@ -93,6 +93,42 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
                 neighbors_key=wnn_key
             )
 
+# ----------------------------
+# Helper: sample filtering
+# ----------------------------
+def filter_invalid_samples(obj):
+    """
+    Remove cells whose Sample_Name indicates 'Multiplet' or 'Undetermined'.
+
+    Works for AnnData or MuData (applies to all modalities).
+    """
+    import re
+
+    def _filter_obs(obs_df):
+        if "Sample_Name" not in obs_df.columns:
+            return obs_df.index
+        mask = ~obs_df["Sample_Name"].astype(str).str.contains(
+            r"Multiplet|Undetermined", flags=re.IGNORECASE, na=False
+        )
+        removed = (~mask).sum()
+        if removed > 0:
+            print(f"🧹 Removing {removed} cells with Sample_Name 'Multiplet' or 'Undetermined'")
+        return obs_df.index[mask]
+
+
+    # MuData → apply to RNA modality (assumed reference)
+    if hasattr(obj, "mod"):
+        rna = obj.mod["rna"] if "rna" in obj.mod else None
+        if rna is not None:
+            valid_cells = _filter_obs(rna.obs)
+            obj = obj[valid_cells, :].copy()
+            obj.update()
+    # AnnData (after mudata check, because mdata also has .obs attribute)
+    elif hasattr(obj, "obs"):
+        valid_cells = _filter_obs(obj.obs)
+        obj = obj[valid_cells, :].copy()
+    return obj
+
 
 # ----------------------------
 # RNA preprocessing
@@ -329,12 +365,14 @@ def main(input_file, output_file, cfg, use_gpu):
 
     if input_file.endswith(".h5mu"):
         mdata = mu.read_h5mu(input_file)
+        mdata = filter_invalid_samples(mdata)
         mdata = preprocess_mdata(mdata, cfg, use_gpu)
         mdata.write_h5mu(output_file)
         print(f"✅ Multimodal preprocessing finished → {output_file}")
 
     elif input_file.endswith(".h5ad"):
         adata = sc.read(input_file)
+        adata = filter_invalid_samples(adata)
         adata = run_gpu_pipeline(adata, cfg) if use_gpu else run_cpu_pipeline(adata, cfg)
         adata.write_h5ad(output_file)
         print(f"✅ Single-modal preprocessing finished → {output_file}")

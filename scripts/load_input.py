@@ -35,14 +35,14 @@ def load_single_file(filepath: str):
     if ext == ".h5ad":
         adata = sc.read(filepath)
         print("📂 Loaded AnnData (.h5ad).")
-        adata.obs["source_file"] = os.path.basename(filepath)
+        adata.obs["source_file"] = os.path.splitext(os.path.basename(filepath))[0]
         return adata
 
     elif ext == ".mtx":
         folder = os.path.dirname(filepath)
         adata = sc.read_10x_mtx(folder, var_names="gene_symbols", cache=True)
         print("📂 Loaded 10X matrix (.mtx).")
-        adata.obs["source_file"] = os.path.basename(filepath)
+        adata.obs["source_file"] = os.path.splitext(os.path.basename(filepath))[0]
         return adata
 
     elif ext in [".rds", ".h5seurat"]:
@@ -50,10 +50,10 @@ def load_single_file(filepath: str):
         if hasattr(obj, "mod"):
             print("🔁 Converted Seurat multimodal object to MuData.")
             for mod in obj.mod.values():
-                mod.obs["source_file"] = os.path.basename(filepath)
+                mod.obs["source_file"] = os.path.splitext(os.path.basename(filepath))[0]
         else:
             print("🔁 Converted Seurat single-modality object to AnnData.")
-            obj.obs["source_file"] = os.path.basename(filepath)
+            obj.obs["source_file"] = os.path.splitext(os.path.basename(filepath))[0]
         return obj
 
     elif ext == ".h5mu":
@@ -67,7 +67,7 @@ def load_single_file(filepath: str):
             print("⚠️ Single modality MuData detected.")
         # attach filename for each modality
         for mod in mdata.mod.values():
-            mod.obs["source_file"] = os.path.basename(filepath)
+            mod.obs["source_file"] = os.path.splitext(os.path.basename(filepath))[0]
         return mdata
 
     else:
