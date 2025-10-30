@@ -1,45 +1,74 @@
-# dashboard/app.py
+#!/usr/bin/env python3
+"""
+app.py — Entry point for the interactive dashboard.
 
+Automatically detects and loads the latest single-cell output (AnnData or MuData)
+from the Snakemake pipeline results.
+
+Usage (inside Singularity container):
+    singularity exec -B $(pwd):/pipeline --nv scrnaseq_pipeline_latest.sif \
+        python /pipeline/dashboard/app.py
+"""
+
+import os
+import sys
 import dash
-from dash import Input, Output
+from dash import html, dcc
 import scanpy as sc
-from components.clustering_umap import clustering_umap_component
-import h5py
+import muon as mu
 
-app = dash.Dash(__name__)
+# ---------------------------------------------------------------------
+# Detect and load latest dataset
+# ---------------------------------------------------------------------
+RESULTS_DIR = "/pipeline/results/latest"
+if not os.path.exists(RESULTS_DIR):
+    sys.exit(f"❌ Error: Expected symlink {RESULTS_DIR} not found. Did the pipeline finish?")
 
-adata = sc.read_h5ad("/pipeline/results/run_2025-10-28_15-52-06/merged_annotated.h5ad")
+# Detect file type (priority: .h5mu > .h5ad)
+mdata_path = os.path.join(RESULTS_DIR, "merged_annotated.h5mu")
+adata_path = os.path.join(RESULTS_DIR, "merged_annotated.h5ad")
 
-app.layout = clustering_umap_component(adata)
+adata = None
+mdata = None
 
-@app.callback(
-    [Output("umap-plot", "figure"),
-     Output("cluster-bar", "figure")],
-    Input("cluster-dropdown", "value")
+if os.path.exists(mdata_path):
+    print(f"📂 Loading MuData: {mdata_path}")
+    mdata = mu.read(mdata_path)
+    # assume RNA modality exists
+    adata = mdata.mod["rna"]
+elif os.path.exists(adata_path):
+    print(f"📂 Loading AnnData: {adata_path}")
+    adata = sc.read_h5ad(adata_path)
+else:
+    sys.exit(f"❌ No annotated file found in {RESULTS_DIR} (expected .h5ad or .h5mu)")
+
+print(f"✅ Loaded object with {adata.n_obs} cells × {adata.n_vars} genes.")
+
+# ---------------------------------------------------------------------
+# Import components
+# ---------------------------------------------------------------------
+from components import clustering_umap  # imports layout + callbacks
+
+# ---------------------------------------------------------------------
+# Initialize Dash app
+# ---------------------------------------------------------------------
+app = dash.Dash(__name__, title="Single-cell Dashboard", suppress_callback_exceptions=True)
+server = app.server  # for deployment use
+
+app.layout = html.Div(
+    [
+        html.H2("🧬 Single-cell Analysis Dashboard", style={"textAlign": "center"}),
+        html.Hr(),
+        clustering_umap.layout(adata),
+    ],
+    style={"margin": "2rem"},
 )
-def update_cluster_plots(cluster_col):
-    import plotly.express as px
-    import pandas as pd
 
-    umap_df = pd.DataFrame({
-        "UMAP1": adata.obsm["X_umap"][:, 0],
-        "UMAP2": adata.obsm["X_umap"][:, 1],
-        "cluster": adata.obs[cluster_col].astype(str)
-    })
+# Register callbacks after layout
+clustering_umap.register_callbacks(app, adata)
 
-    fig_umap = px.scatter(
-        umap_df,
-        x="UMAP1", y="UMAP2",
-        color="cluster",
-        title=f"UMAP - {cluster_col}",
-        opacity=0.7,
-    )
-
-    cluster_counts = adata.obs[cluster_col].value_counts().reset_index()
-    cluster_counts.columns = ["cluster", "n_cells"]
-    fig_bar = px.bar(cluster_counts, x="cluster", y="n_cells", title="Cells per cluster")
-
-    return fig_umap, fig_bar
-
+# ---------------------------------------------------------------------
+# Run server
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    app.run(debug=False, host="0.0.0.0", port=8050)
