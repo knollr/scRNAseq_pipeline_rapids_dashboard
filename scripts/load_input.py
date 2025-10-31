@@ -225,7 +225,11 @@ def merge_mudatas(mdatas):
     """
     Merge multiple MuData objects by merging shared modalities (e.g. RNA, prot).
     """
-    # Collect modality names
+    for i, m in enumerate(mdatas):
+        for mod in m.mod:
+            prefix = f"sample{i+1}_"
+            m.mod[mod].obs_names = prefix + m.mod[mod].obs_names.astype(str)
+    
     all_modalities = set()
     for m in mdatas:
         all_modalities.update(m.mod.keys())
@@ -233,10 +237,23 @@ def merge_mudatas(mdatas):
     merged_mods = {}
     for mod in all_modalities:
         print(f"🔗 Merging modality: {mod}")
-        adatas = [m.mod[mod] for m in mdatas if mod in m.mod and not hasattr(m.mod[mod], "mod")]
+        adatas = [m.mod[mod] for m in mdatas if mod in m.mod]
         merged_mods[mod] = merge_adatas(adatas)
 
     merged_mdata = mu.MuData(merged_mods)
+
+    # --- 🔧 FIX: harmonize obs_names across modalities ---
+    print("🧩 Harmonizing obs_names across modalities...")
+    for mod in merged_mdata.mod:
+        merged_mdata.mod[mod].obs_names_make_unique()
+
+    # intersect obs_names across all modalities
+    shared = set.intersection(*(set(m.obs_names) for m in merged_mdata.mod.values()))
+    if len(shared) < merged_mdata.n_obs:
+        print(f"⚠️ Subsetting to {len(shared)} shared cells across modalities")
+        merged_mdata = merged_mdata[list(shared), :].copy()
+
+    merged_mdata.update()
     print(f"✅ Merged MuData with modalities: {list(merged_mdata.mod.keys())}")
     return merged_mdata
 

@@ -93,6 +93,16 @@ def register_callbacks(app, adata):
     def update_qc_plots(qc_metric, umap_choice):
         df = adata.obs.copy()
 
+        # ===== Shared color map for source_file =====
+        if "source_file" in df.columns:
+            source_files = df['source_file'].unique()
+            color_palette = px.colors.qualitative.Plotly
+            n_repeat = int(np.ceil(len(source_files)/len(color_palette)))
+            palette = (color_palette * n_repeat)[:len(source_files)]
+            color_map = dict(zip(source_files, palette))
+        else:
+            color_map = {}
+
         # ===== Violin Plot =====
         if "source_file" in df.columns and qc_metric in df.columns:
             fig_violin = px.violin(
@@ -100,11 +110,13 @@ def register_callbacks(app, adata):
                 x="source_file",
                 y=qc_metric,
                 box=True,
-                points=False,
+                points=False,                   # remove dots
+                color="source_file",
+                color_discrete_map=color_map,
                 title=f"Distribution of {qc_metric} per source_file",
                 template="plotly_white",
             )
-            fig_violin.update_traces(width=0.4)
+            fig_violin.update_traces(width=0.8)
             fig_violin.update_layout(
                 xaxis_title="Source file",
                 yaxis_title=qc_metric,
@@ -123,6 +135,8 @@ def register_callbacks(app, adata):
                 cell_counts,
                 x="source_file",
                 y="Cell count",
+                color="source_file",
+                color_discrete_map=color_map,
                 title="Cells per source_file",
                 text_auto=True,
                 template="plotly_white",
@@ -154,13 +168,17 @@ def register_callbacks(app, adata):
                     + " | "
                     + df.loc[umap_plot_df.index, "Sample_Name"].astype(str)
                 )
+                # assign colors only for source_file portion
+                color_for_umap = {k: v for k, v in color_map.items() if k in df["source_file"].unique()}
                 title = "UMAP colored by source_file + Sample_Name"
             else:
                 if "source_file" in df.columns:
                     umap_plot_df["color"] = df.loc[umap_plot_df.index, "source_file"].astype(str)
+                    color_for_umap = color_map
                     title = "UMAP colored by source_file"
                 else:
                     umap_plot_df["color"] = "unknown"
+                    color_for_umap = None
                     title = "UMAP (no source_file found)"
 
             fig_umap = px.scatter(
@@ -168,6 +186,7 @@ def register_callbacks(app, adata):
                 x="UMAP1",
                 y="UMAP2",
                 color="color",
+                color_discrete_map=color_for_umap,
                 title=f"{title} (showing {umap_plot_df.shape[0]} / {n_total} cells)",
                 opacity=0.7,
                 render_mode="webgl",
