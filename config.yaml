@@ -1,11 +1,11 @@
 ### `config.yaml`
 
 inputs:
-  - "data/demo_500_cells.h5ad"
+  #- "data/demo_500_cells.h5ad"
   #- "data/demo_500_cells_2.h5ad"
   #- "data/pbmc.rds"
   #- "data/pbmc_small.rds"
-  #- "data/Rhapsody.h5mu"
+  - "data/Rhapsody.h5mu"
   #- "data/Rhapsody.rds"
 use_gpu: True
 
@@ -28,10 +28,12 @@ preprocessing:
     n_pcs_prot: 10
     n_neighbors: 15
     umap_n_components: 2
+    mt_pct: 30 
 
 celltypist:
   models:
     - "Immune_All_High.pkl"
+    - "Immune_All_Low.pkl"
     - "Adult_COVID19_PBMC.pkl"
     - "COVID19_Immune_Landscape.pkl"
     - "Healthy_COVID19_PBMC.pkl"

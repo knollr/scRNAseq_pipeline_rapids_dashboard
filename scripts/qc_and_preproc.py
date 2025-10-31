@@ -152,6 +152,19 @@ def filter_qc(adata, cfg):
     p = cfg["params"]
     sc.pp.filter_cells(adata, min_genes=p["min_genes"])
     sc.pp.filter_genes(adata, min_cells=p["min_cells"])
+    
+    # Compute mitochondrial gene fraction (%)
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True)
+
+    if "mt_pct" in p and p["mt_pct"] is not None:
+        before = adata.n_obs
+        adata = adata[adata.obs["pct_counts_mt"] < p["mt_pct"], :].copy()
+        after = adata.n_obs
+        print(f"🧹 Filtered {before - after} cells with pct_counts_mt ≥ {p['mt_pct']}%")
+    else:
+        print("ℹ️ No mitochondrial filtering applied (mt_pct not set in config)")
+
 
     # Optionally store raw counts
     if cfg.get("store_raw_counts", False):
@@ -252,6 +265,42 @@ def run_gpu_pipeline(adata, cfg):
     rsc.get.anndata_to_GPU(adata)
     rsc.pp.filter_cells(adata, min_genes=p["min_genes"])
     rsc.pp.filter_genes(adata, min_cells=p["min_cells"])
+    
+    # adjusted for rapids-singlecell (different function compared to scanpy)
+    # Detect mitochondrial genes
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    mito_genes = adata.var["mt"].values
+
+    if mito_genes.sum() > 0:
+        print(f"🧬 Found {mito_genes.sum()} mitochondrial genes — calculating pct_counts_mt (GPU)...")
+
+        # Sum counts across mito and total features using CuPy (stay on GPU)
+        if issparse(adata.X):
+            mito_counts = cp.asarray(adata[:, mito_genes].X.sum(axis=1)).ravel()
+            total_counts = cp.asarray(adata.X.sum(axis=1)).ravel()
+        else:
+            mito_counts = adata.X[:, mito_genes].sum(axis=1)
+            total_counts = adata.X.sum(axis=1)
+
+        # Avoid division by zero
+        total_counts = cp.where(total_counts == 0, 1, total_counts)
+        pct_counts_mt = (mito_counts / total_counts) * 100.0
+
+        # Bring result to CPU (AnnData.obs is pandas)
+        adata.obs["pct_counts_mt"] = cp.asnumpy(pct_counts_mt)
+    else:
+        adata.obs["pct_counts_mt"] = 0.0
+        print("⚠️ No mitochondrial genes found (no 'MT-' prefix detected)")
+
+    # Optional filtering based on mitochondrial content
+    if "mt_pct" in p and p["mt_pct"] is not None:
+        before = adata.n_obs
+        keep_idx = adata.obs["pct_counts_mt"] < p["mt_pct"]
+        adata = adata[keep_idx, :].copy()
+        after = adata.n_obs
+        print(f"🧹 Filtered {before - after} cells with pct_counts_mt ≥ {p['mt_pct']}%")
+    else:
+        print("ℹ️ No mitochondrial filtering applied (mt_pct not set in config)")
 
     if cfg.get("store_raw_counts", False):
         print("💾 Storing raw counts in adata.layers['counts']")
