@@ -67,12 +67,14 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
 # Optional: install seurat-disk from GitHub
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -e "remotes::install_github('mojaveazure/seurat-disk')" && \
-    R -e "devtools::install_github('PMBio/MuDataSeurat')"      
+    R -e "devtools::install_github('PMBio/MuDataSeurat')" && \
+    R -q -e "remotes::install_github('samuel-marsh/scCustomize', upgrade='never')" && \
+    R -q -e "library(scCustomize); cat('✅ scCustomize installed successfully\n')"      
 
 # Install Bioconductor packages
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); \
-             BiocManager::install(c('zellkonverter', 'SingleCellExperiment', 'scCustomize', 'hdf5r'), ask=FALSE, update=F)"
+             BiocManager::install(c('zellkonverter', 'SingleCellExperiment','hdf5r'), ask=FALSE, update=F)"
 
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
@@ -102,6 +104,23 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
         pyyaml rpy2 \
     && conda clean -afy
     
+# --- Add scvi-tools, Solo, totalVI / MultiVI dependencies ---
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    pip install --no-cache-dir \
+        scrublet==0.2.3 \
+        torch==2.1.2+cu118 torchvision==0.16.2+cu118 torchaudio==2.1.2+cu118 \
+        --index-url https://download.pytorch.org/whl/cu118 && \
+    pip install --no-cache-dir \
+        scvi-tools==1.1.3 solo-sc==1.6.1 lightning==2.2.5 && \
+    python -c "import scrublet, torch, scvi, solo; print('✅ scvi-tools & doublet detection ready'); print('CUDA:', torch.version.cuda)" && \
+    conda clean -afy
+
+# --- Add scATAC-seq analysis tools ---
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    pip install --no-cache-dir \
+        pyranges==0.3.3 pybiomart==0.2.0 genomepy==0.16.1 episcanpy==0.4.1 pyGenomeTracks==3.8.0 pyBigWig==0.3.22 && \
+    python -c "import muon, episcanpy, pyranges; print('✅ scATAC tools ready')" && \
+    conda clean -afy    
 
 # validation of installations
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \

@@ -25,6 +25,91 @@ import numpy as np
 import scipy.sparse as sp
 
 
+# =====================================
+# Helper: Doublet detection (Scrublet or Solo)
+# =====================================
+def detect_doublets(adata, cfg):
+    """
+    Run doublet detection per cartridge using Scrublet (CPU) or Solo (GPU).
+
+    If using RAPIDS (GPU), moves data safely to CPU using rsc.get.anndata_to_CPU().
+    Expects .obs['source_file'] to label cartridges.
+    """
+    import numpy as np
+    import pandas as pd
+    import scipy.sparse as sp
+
+    dbl_cfg = cfg["preprocessing"]["doublets"]
+    use_gpu = cfg.get("use_gpu", False)
+    enabled = dbl_cfg.get("enabled", False)
+    if not enabled:
+        print("🧩 Doublet detection disabled in config.")
+        return adata
+
+    method = dbl_cfg.get("method", "auto")
+    if method == "auto":
+        method = "solo" if use_gpu else "scrublet"
+
+    rate = float(dbl_cfg["doublet_rate"])
+    sim_ratio = float(dbl_cfg.get("sim_doublet_ratio", 2.0))
+    print(f"🔧 Running {method.upper()} doublet detection (rate={rate:.1%})")
+
+    # --- Move GPU-backed data to CPU safely ---
+    if use_gpu:
+        try:
+            import rapids_singlecell as rsc
+            print("📤 Moving AnnData from GPU to CPU for doublet detection...")
+            adata_cpu = adata.copy()
+            adata_cpu = rsc.get.anndata_to_CPU(adata_cpu)
+        except Exception as e:
+            print(f"⚠️ Could not convert with rsc.get.anndata_to_CPU(): {e}")
+            adata_cpu = adata.copy()
+    else:
+        adata_cpu = adata.copy()
+
+    scores, preds = [], []
+    if "source_file" not in adata_cpu.obs.columns:
+        print("⚠️ No 'source_file' column found in .obs — running on full dataset.")
+        groups = {"all": adata_cpu.obs_names}
+    else:
+        groups = adata_cpu.obs.groupby("source_file").indices
+
+    for src, idx in groups.items():
+        sub = adata_cpu[idx, :]
+        print(f"\n📦 Processing cartridge: {src} ({sub.n_obs} cells)")
+
+        if method == "scrublet":
+            import scrublet as scr
+            counts = sub.X.astype(np.float32) if sp.issparse(sub.X) else np.array(sub.X, dtype=np.float32)
+            scrub = scr.Scrublet(counts, expected_doublet_rate=rate, sim_doublet_ratio=sim_ratio)
+            scs, preds_local = scrub.scrub_doublets()
+        elif method == "solo":
+            from solo import Solo
+            solo = Solo.from_anndata(sub, expected_doublet_rate=rate)
+            solo.train()
+            scs = solo.get_doublet_scores()
+            preds_local = solo.predict()
+        else:
+            raise ValueError(f"Unknown doublet detection method: {method}")
+
+        scores.append(pd.Series(scs, index=sub.obs_names))
+        preds.append(pd.Series(preds_local, index=sub.obs_names))
+        print(f"✅ {preds_local.sum()} doublets ({100 * preds_local.mean():.2f}%) in {src}")
+
+    adata.obs["doublet_score"] = pd.concat(scores)
+    adata.obs["predicted_doublet"] = pd.concat(preds)
+    
+    n_doublets = int(adata.obs["predicted_doublet"].sum())
+    print(f"🎯 Doublet detection complete — {n_doublets} predicted doublets ({100*n_doublets/adata.n_obs:.2f}%)")
+
+    if remove:
+        print("🧹 Removing predicted doublets from dataset...")
+        adata = adata[~adata.obs["predicted_doublet"]].copy()
+        print(f"✅ Remaining cells: {adata.n_obs}")
+        
+    return adata
+
+
 # ----------------------------
 # Helper: clustering
 # ----------------------------
@@ -129,26 +214,25 @@ def filter_invalid_samples(obj):
         obj = obj[valid_cells, :].copy()
     return obj
 
-
 # ----------------------------
-# RNA preprocessing
+# CPU and GPU pipelines
 # ----------------------------
-def filter_qc(adata, cfg):
+def run_cpu_pipeline(adata, cfg):
     """
     Filter, normalize, and preprocess RNA data using Scanpy.
 
     Parameters
     ----------
-    adata : AnnData
-        RNA AnnData object
-    cfg : dict
-        Configuration dictionary
+    adata : AnnData RNA AnnData object
+    cfg : dict Configuration dictionary
 
     Returns
     -------
-    AnnData
-        Preprocessed AnnData
+    AnnData:  Preprocessed AnnData
     """
+    
+    print("🧠 Running CPU-based Scanpy preprocessing...")
+
     p = cfg["params"]
     sc.pp.filter_cells(adata, min_genes=p["min_genes"])
     sc.pp.filter_genes(adata, min_cells=p["min_cells"])
@@ -171,6 +255,10 @@ def filter_qc(adata, cfg):
         print("💾 Storing raw counts in adata.layers['counts']")
         adata.layers["counts"] = adata.X.copy()
 
+    # doublets
+    if cfg["preprocessing"].get("doublets", {}).get("enabled", False):
+        adata = detect_doublets(adata, cfg)    
+    
     # Normalization and feature selection
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
@@ -237,14 +325,6 @@ def filter_qc(adata, cfg):
     return adata
 
 
-# ----------------------------
-# CPU and GPU pipelines
-# ----------------------------
-def run_cpu_pipeline(adata, cfg):
-    print("🧠 Running CPU-based Scanpy preprocessing...")
-    return filter_qc(adata, cfg)
-
-
 def run_gpu_pipeline(adata, cfg):
     """
     GPU-accelerated preprocessing using rapids-singlecell.
@@ -252,7 +332,18 @@ def run_gpu_pipeline(adata, cfg):
     import rapids_singlecell as rsc
     from cupyx.scipy.sparse import issparse
     import cupy as cp
-
+    
+    # ## new insert
+    import rmm
+    from rmm.allocators.cupy import rmm_cupy_allocator
+    rmm.reinitialize(
+        managed_memory=True,
+        pool_allocator= True,
+        devices = [0, 1]
+        )
+    cp.cuda.set_allocator(rmm_cupy_allocator)
+    ##   # ## end new insert
+    
     p = cfg["params"]
     print("⚡ Running GPU-based preprocessing with rapids-singlecell...")
 
@@ -307,36 +398,75 @@ def run_gpu_pipeline(adata, cfg):
         adata.layers["counts"] = adata.X.copy()
         rsc.get.anndata_to_CPU(adata, layers=["counts"])
 
+    if cfg["preprocessing"].get("doublets", {}).get("enabled", False):
+        adata = detect_doublets(adata, cfg)
+
     rsc.pp.normalize_total(adata, target_sum=1e4)
     rsc.pp.log1p(adata)
     
     # Remove NaN or invalid values directly on GPU
     print("🧹 Checking for NaN or empty features (GPU mode)...")
     # Detect and replace NaNs / infinities 
+    # if issparse(adata.X):
+    #     # Only operate on the stored data
+    #     if cp.isnan(adata.X.data).any():
+    #         print("⚠️ NaNs detected → replacing with 0")
+    #         adata.X.data = cp.nan_to_num(
+    #             adata.X.data, nan=0.0, posinf=0.0, neginf=0.0
+    #         )
+    # else:
+    #     if cp.isnan(adata.X).any():
+    #         print("⚠️ NaNs detected → replacing with 0")
+    #         adata.X = cp.nan_to_num(
+    #             adata.X, nan=0.0, posinf=0.0, neginf=0.0
+    #         )
+    # # Remove all-zero genes (columns) 
+    # if issparse(adata.X):
+    #     # Count non-zero entries per column
+    #     X_pos = (adata.X > 0).astype(cp.float32)  # <-- important!
+    #     nonzero_genes = cp.array(X_pos.sum(axis=0)).ravel() > 0
+    # else:
+    #     nonzero_genes = cp.array((adata.X > 0).sum(axis=0)).ravel() > 0
+    # if not nonzero_genes.all():
+    #     print(f"🧬 Removing {(~nonzero_genes).sum()} all-zero genes")
+    #     # Indexing works with sparse or dense matrices
+    #     adata = adata[:, cp.asnumpy(nonzero_genes)].copy()
+    # Remove all-zero genes (columns)
+    # --- 1️⃣ Clean NaNs and Infs ---
     if issparse(adata.X):
-        # Only operate on the stored data
-        if cp.isnan(adata.X.data).any():
-            print("⚠️ NaNs detected → replacing with 0")
-            adata.X.data = cp.nan_to_num(
-                adata.X.data, nan=0.0, posinf=0.0, neginf=0.0
-            )
+        if cp.isnan(adata.X.data).any() or cp.isinf(adata.X.data).any():
+            print("⚠️ NaNs/Infs detected in sparse matrix → replacing with 0")
+            adata.X.data = cp.nan_to_num(adata.X.data, nan=0.0, posinf=0.0, neginf=0.0)
     else:
-        if cp.isnan(adata.X).any():
-            print("⚠️ NaNs detected → replacing with 0")
-            adata.X = cp.nan_to_num(
-                adata.X, nan=0.0, posinf=0.0, neginf=0.0
-            )
-    # Remove all-zero genes (columns) 
+        if cp.isnan(adata.X).any() or cp.isinf(adata.X).any():
+            print("⚠️ NaNs/Infs detected in dense matrix → replacing with 0")
+            adata.X = cp.nan_to_num(adata.X, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # --- 2️⃣ Identify and safely remove all-zero genes ---
     if issparse(adata.X):
-        # Count non-zero entries per column
-        X_pos = (adata.X > 0).astype(cp.float32)  # <-- important!
-        nonzero_genes = cp.array(X_pos.sum(axis=0)).ravel() > 0
+        # Count nonzero entries per column
+        X_pos = (adata.X > 0).astype(cp.float32)
+        nonzero_genes = cp.ravel(X_pos.sum(axis=0)) > 0
     else:
-        nonzero_genes = cp.array((adata.X > 0).sum(axis=0)).ravel() > 0
-    if not nonzero_genes.all():
-        print(f"🧬 Removing {(~nonzero_genes).sum()} all-zero genes")
-        # Indexing works with sparse or dense matrices
-        adata = adata[:, cp.asnumpy(nonzero_genes)].copy()
+        nonzero_genes = cp.ravel((adata.X > 0).sum(axis=0)) > 0
+
+    n_total = adata.shape[1]
+    n_removed = int((~nonzero_genes).sum())
+    n_keep = int(nonzero_genes.sum())
+
+    if n_removed > 0:
+        if n_keep == 0:
+            print(f"🚨 All {n_total} genes appear to be zero — skipping removal to avoid empty dataset")
+        else:
+            print(f"🧬 Removing {n_removed} all-zero genes (keeping {n_keep})")
+            # Convert mask to CPU (AnnData slicing requires NumPy)
+            mask_cpu = cp.asnumpy(nonzero_genes)
+            adata = adata[:, mask_cpu].copy()
+    else:
+        print("✅ No all-zero genes found")
+
+    # Optional sanity check
+    print(f"✅ Matrix shape after cleanup: {adata.shape}")
         
     adata.layers["norm_data"] = adata.X.copy()    
     rsc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
