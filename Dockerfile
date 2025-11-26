@@ -1,15 +1,15 @@
 # Use a RAPIDS / CI-Conda image that has Python 3.12 and CUDA 11.4
 FROM rapidsai/ci-conda:cuda11.4.3-ubuntu20.04-py3.12  AS base
-# (This image exists on Docker Hub) :contentReference[oaicite:0]{index=0}
 
-# Optional: set noninteractive
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
-#ENV PATH=/opt/conda/bin:$PATH
 ENV CONDA_HTTP_RETRIES=5
 ENV CONDA_DOWNLOAD_TIMEOUT=300
 
-# Install extra system dependencies you need
+# -------------------------------------------------------------------------------
+# System Dependencies
+# -------------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         git \
@@ -32,10 +32,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         g++ \
         pkg-config \
+        libstdc++6 \
         # add any libs you need, e.g. libhdf5, etc.
     && rm -rf /var/lib/apt/lists/*
 
-# Create and activate a conda environment (if not already present)
+# -------------------------------------------------------------------------------
+# Conda Creation
+# -------------------------------------------------------------------------------
 RUN mkdir -p /opt && \
     wget -qO /tmp/Miniforge3.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh && \
     bash /tmp/Miniforge3.sh -u -b -p /opt/conda && \
@@ -45,37 +48,46 @@ RUN mkdir -p /opt && \
 RUN /opt/conda/bin/conda create -y -n pipeline python=3.12 \
     && /opt/conda/bin/conda clean -afy
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "--login", "-c"]
 
+
+# -------------------------------------------------------------------------------
+# Rapids
+# -------------------------------------------------------------------------------
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     conda install -y -c conda-forge mamba && \
     mamba install -y -c rapidsai -c nvidia -c conda-forge -c bioconda \
         rapids=25.06 cudatoolkit=11.4 snakemake && \
     conda clean -afy
 
-# Install R + Seurat in the pipeline conda env
+# -------------------------------------------------------------------------------
+# R packages (for version control, via remotes would be better)
+# -------------------------------------------------------------------------------
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     mamba install -y -c conda-forge \
         r-base>=4.3 \
         r-seurat \
         r-remotes \
+        r-essentials \
+        r-tidyverse \
         r-hdf5r \
         r-devtools \
         r-rcpp \
+        r-Cairo \
+        r-ggrastr \
     && conda clean -afy
 
-# Optional: install seurat-disk from GitHub
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -e "remotes::install_github('mojaveazure/seurat-disk')" && \
     R -e "devtools::install_github('PMBio/MuDataSeurat')" && \
     R -q -e "remotes::install_github('samuel-marsh/scCustomize', upgrade='never')" && \
-    R -q -e "library(scCustomize); cat('✅ scCustomize installed successfully\n')"      
+    R -q -e "library(scCustomize); cat('✅ scCustomize installed successfully\n')"  && \
+    R -q -e "remotes::install_github('chris-mcginnis-ucsf/DoubletFinder', force = TRUE, upgrade = 'never')"
+  
 
-# Install Bioconductor packages
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); \
              BiocManager::install(c('zellkonverter', 'SingleCellExperiment','hdf5r'), ask=FALSE, update=F)"
-
 
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     R -q -e "if ('Seurat' %in% rownames(installed.packages())) { \
@@ -85,8 +97,15 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
                 q(status=1); \
               }"
 
+# -------------------------------------------------------------------------------
+# Python core packages 
+# -------------------------------------------------------------------------------
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
+    pip install --no-cache-dir \
+        rpy2
 
-# Install core Python packages efficiently
+ENV LD_LIBRARY_PATH=/opt/conda/envs/pipeline/lib:/opt/conda/lib:$LD_LIBRARY_PATH
+
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     mamba install -y -c conda-forge \
         python-igraph=0.11.9 \
@@ -94,38 +113,46 @@ RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
         leidenalg=0.10.2 \
         zarr=3.1.3 \
         hdf5plugin=5.1.0 \
+        lerc=3.0 \
     && pip install --no-cache-dir \
+        pillow==9.0.0 \
         scanpy==1.11.4 anndata==0.12.2 pandas==2.3.2 \
         mudata==0.3.2 muon==0.1.7 \
         scikit-learn==1.7.1 plotly==6.3.0 dash==3.2.0 \
-        scipy==1.15.3 matplotlib==3.10.6 seaborn==0.13.2 \
+        scipy==1.15.3 matplotlib==3.7.5 seaborn==0.13.2 \
         loompy==3.0.8 decoupler==2.1.1 gseapy==1.1.9 \
         goatools==1.5.1 pyscenic==0.12.1 celltypist==1.7.1 \
-        pyyaml rpy2 \
+        pyyaml  \
     && conda clean -afy
     
-# --- Add scvi-tools, Solo, totalVI / MultiVI dependencies ---
+# -------------------------------------------------------------------------------
+# Python PyTorch (CPU version due to old software on DZNE server)
+# -------------------------------------------------------------------------------
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
-    pip install --no-cache-dir \
-        scrublet==0.2.3 \
-        torch==2.1.2+cu118 torchvision==0.16.2+cu118 torchaudio==2.1.2+cu118 \
-        --index-url https://download.pytorch.org/whl/cu118 && \
-    pip install --no-cache-dir \
-        scvi-tools==1.1.3 solo-sc==1.6.1 lightning==2.2.5 && \
-    python -c "import scrublet, torch, scvi, solo; print('✅ scvi-tools & doublet detection ready'); print('CUDA:', torch.version.cuda)" && \
+    pip install \
+    torch==2.2.2+cpu torchvision==0.17.2+cpu torchaudio==2.2.2+cpu \
+    --index-url https://download.pytorch.org/whl/cpu && \
+    pip install scvi-tools==1.1.3 lightning==2.1.2  && \
+    python -c "import torch; print('Torch built with CUDA:', torch.version.cuda)" && \
     conda clean -afy
 
-# --- Add scATAC-seq analysis tools ---
+
+# -------------------------------------------------------------------------------
+# Python ATACseq analysis 
+# -------------------------------------------------------------------------------
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
     pip install --no-cache-dir \
-        pyranges==0.3.3 pybiomart==0.2.0 genomepy==0.16.1 episcanpy==0.4.1 pyGenomeTracks==3.8.0 pyBigWig==0.3.22 && \
-    python -c "import muon, episcanpy, pyranges; print('✅ scATAC tools ready')" && \
+        pyranges==0.1.4 pybiomart==0.2.0 genomepy==0.16.1 pyGenomeTracks==3.8.0 pyBigWig==0.3.22 && \
+    python -c "import muon, pyranges; print('✅ scATAC tools ready')" && \
     conda clean -afy    
 
 # validation of installations
 RUN source /opt/conda/etc/profile.d/conda.sh && conda activate pipeline && \
-    python -c "import scanpy, anndata, rpy2; print('✅ Python OK')" && \
-    R -q -e "library(Seurat); library(SeuratDisk); cat('✅ R OK\n')"
+    python -c "import scanpy, anndata, rpy2; print('✅ Python OK')" 
+
+# -------------------------------------------------------------------------------
+# Last Steps
+# -------------------------------------------------------------------------------
 
 ENV PATH=/opt/conda/envs/pipeline/bin:/opt/conda/bin:$PATH
 
