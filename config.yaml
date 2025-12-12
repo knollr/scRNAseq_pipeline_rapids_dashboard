@@ -5,30 +5,62 @@ inputs:
   #- "data/demo_500_cells_2.h5ad"
   #- "data/pbmc.rds"
   #- "data/pbmc_small.rds"
-  - "data/Rhapsody.h5mu"
+  #- "data/Rhapsody_c1.h5mu"
+  #- "data/Rhapsody_c2.h5mu"
   #- "data/Rhapsody.rds"
-use_gpu: True
+  - "datasets/D1/output/D1WTA.h5mu"
+  - "datasets/D2/output/D2WTA.h5mu"
+  - "datasets/D3/output/D3WTA.h5mu"
+  - "datasets/D4/output/D4WTA.h5mu"
+  - "datasets/D5/output/D5WTA.h5mu"
+  - "datasets/D6/output/D6WTA.h5mu"
+  - "datasets/D7/output/D7WTA.h5mu"
+  - "datasets/D8/output/D8WTA.h5mu"
+  - "datasets/D9/output/D9WTA.h5mu"
+  - "datasets/D10/output/D10WTA.h5mu"
+  - "datasets/D11/output/D11WTA.h5mu"
 
-# only read if input is seurat object (.rds)
-multi_modal_seurat: True 
-# if true, will read .rds as muon object with RNA and protein modality (ADT)
-# if false, will read .rds as anndata object with only RNA modality
+use_gpu: False
 
-store_raw_counts: True
+
+multi_modal_seurat: True # only read if input is seurat object (.rds): true, as muon. false: as anndata object
+
+
 
 preprocessing:
+  store_raw_counts: True
+  
   clustering: 
     louvain: True
     leiden: True
+
   params:
-    min_genes: 300
+    mode: "auto"   # "auto" = MAD filtering, "manual" = use manual cutoffs
+    nmads: 5
+
+    # manual cutoffs (ignored if mode = auto)
+    min_counts: 500
+    max_counts: 60000
+    max_mito: 15
+    max_ribo: 60
+    max_hb: 1
+
+    # additional
     min_cells: 5
+    min_genes: 200
     n_top_genes: 2000
     n_pcs: 20
     n_pcs_prot: 10
     n_neighbors: 15
     umap_n_components: 2
-    mt_pct: 30 
+
+
+  doublets:
+    enabled: True               # whether to run doublet detection
+    method: "scrublet"                # choose: "scrublet", "solo" or "DoubletFinder"
+    doublet_rate: 0.1           # expected doublet rate (BD Rhapsdoy, loaded 55k cells = 0.1)
+    sim_doublet_ratio: 2.0      # Scrublet parameter  
+    remove_after_detection: True  # remove predicted doublets automatically
 
 celltypist:
   models:

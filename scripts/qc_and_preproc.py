@@ -39,16 +39,13 @@ def detect_doublets(adata, cfg):
     import pandas as pd
     import scipy.sparse as sp
 
-    dbl_cfg = cfg["preprocessing"]["doublets"]
-    use_gpu = cfg.get("use_gpu", False)
+    dbl_cfg = cfg["doublets"]
     enabled = dbl_cfg.get("enabled", False)
     if not enabled:
         print("🧩 Doublet detection disabled in config.")
         return adata
 
-    method = dbl_cfg.get("method", "auto")
-    if method == "auto":
-        method = "solo" if use_gpu else "scrublet"
+    method = dbl_cfg.get("method", "scrublet")
 
     rate = float(dbl_cfg["doublet_rate"])
     sim_ratio = float(dbl_cfg.get("sim_doublet_ratio", 2.0))
@@ -59,13 +56,30 @@ def detect_doublets(adata, cfg):
         try:
             import rapids_singlecell as rsc
             print("📤 Moving AnnData from GPU to CPU for doublet detection...")
+            
+            ### test
+            print("⚠️Type of adata.X:", type(adata.X))
+            ### end 
+            
             adata_cpu = adata.copy()
+            
+            ### test
+            print("Type of pre conversion adata_cpu.X:", type(adata_cpu.X))
+            ### end 
+            
+            
             adata_cpu = rsc.get.anndata_to_CPU(adata_cpu)
+            
+            ### test
+            print("Type of post conversion adata_cpu.X:", type(adata_cpu.X))
+            ### end 
         except Exception as e:
             print(f"⚠️ Could not convert with rsc.get.anndata_to_CPU(): {e}")
             adata_cpu = adata.copy()
     else:
         adata_cpu = adata.copy()
+        
+    print("adata_cpu type after conversion:", type(adata_cpu))
 
     scores, preds = [], []
     if "source_file" not in adata_cpu.obs.columns:
@@ -79,16 +93,23 @@ def detect_doublets(adata, cfg):
         print(f"\n📦 Processing cartridge: {src} ({sub.n_obs} cells)")
 
         if method == "scrublet":
-            import scrublet as scr
-            counts = sub.X.astype(np.float32) if sp.issparse(sub.X) else np.array(sub.X, dtype=np.float32)
-            scrub = scr.Scrublet(counts, expected_doublet_rate=rate, sim_doublet_ratio=sim_ratio)
-            scs, preds_local = scrub.scrub_doublets()
-        elif method == "solo":
-            from solo import Solo
-            solo = Solo.from_anndata(sub, expected_doublet_rate=rate)
-            solo.train()
-            scs = solo.get_doublet_scores()
-            preds_local = solo.predict()
+            sub = sc.pp.scrublet(
+                    sub,
+                    expected_doublet_rate=rate,
+                    sim_doublet_ratio=sim_ratio,
+                    copy = True
+            )
+            scs = sub.obs["doublet_score"] 
+            preds_local = sub.obs["predicted_doublet"] 
+        # elif method == "solo":
+        #     from scvi.model import SOLO
+        #     import torch
+
+        #     # Setup SOLO model
+        #     solo = SOLO(sub, expected_doublet_rate=rate)
+        #     solo.train(max_epochs=20, use_gpu=torch.cuda.is_available())
+        #     scs = solo.get_doublet_scores()
+        #     preds_local = solo.predict()
         else:
             raise ValueError(f"Unknown doublet detection method: {method}")
 
@@ -99,11 +120,85 @@ def detect_doublets(adata, cfg):
     adata.obs["doublet_score"] = pd.concat(scores)
     adata.obs["predicted_doublet"] = pd.concat(preds)
     
+    # Store method and configured rate
+    adata.obs["doublet_method"] = method
+    adata.obs["doublet_rate"] = rate
+
+    # Compute detected doublet % per source_file
+    if "source_file" in adata.obs.columns:
+        detected_rates = (
+            adata.obs.groupby("source_file")["predicted_doublet"]
+            .mean()
+            .rename("detected_doublet_rate")
+        )
+        # map back to obs
+        adata.obs["detected_doublet_rate"] = (
+            adata.obs["source_file"].map(detected_rates)
+        )
+    else:
+        # if no source_file, global rate for all cells
+        detected_rate_global = adata.obs["predicted_doublet"].mean()
+        adata.obs["detected_doublet_rate"] = detected_rate_global
+    
     n_doublets = int(adata.obs["predicted_doublet"].sum())
     print(f"🎯 Doublet detection complete — {n_doublets} predicted doublets ({100*n_doublets/adata.n_obs:.2f}%)")
 
-    if remove:
+    # ----------------------------------------------------------
+    # export dataframe for dashboard qc plot 
+    # ----------------------------------------------------------
+    try:
+        import os
+        
+        # choose columns you want to export
+        qc_cols = [
+            "source_file",
+            "Sample_Name",
+            "total_counts",
+            "log1p_total_counts", 
+            "n_genes",
+            "log1p_n_genes_by_counts",
+            "pct_counts_mt",
+            "pct_counts_ribo",
+            "pct_counts_hb",
+            "doublet_score",
+            "predicted_doublet",
+            "doublet_method",
+            "doublet_rate",
+            "detected_doublet_rate",
+        ]
+        # only keep columns that actually exist
+        qc_cols = [c for c in qc_cols if c in adata.obs.columns]
+
+        export_df = adata.obs[qc_cols].copy()
+        export_df.index.name = "cell_id"
+
+        # ensure result folder exists
+        results_dir = os.path.dirname(output_file)
+        os.makedirs(results_dir, exist_ok=True)
+
+        # file name
+        out_csv = os.path.join(
+            results_dir,
+            "doublet_qc_dataframe_pre_filtering.csv"
+        )
+
+        # export
+        export_df.to_csv(out_csv)
+        print(f"📁 Exported doublet QC dataframe → {out_csv} ({export_df.shape})")
+
+    except Exception as e:
+        print(f"❌ Could not export doublet QC dataframe: {e}")
+
+
+    if dbl_cfg.get("remove_after_detection", True):
+        import os
         print("🧹 Removing predicted doublets from dataset...")
+        results_dir = os.path.dirname(output_file)
+        ext = os.path.splitext(output_file)[1]
+        pre_doublet_file = os.path.join(results_dir, f"adata_unprocessed_pre_doublet_clean{ext}")
+        adata.write_h5ad(pre_doublet_file)
+        print(f"💾 Saved pre-doublet-cleaned AnnData to {pre_doublet_file}")
+        
         adata = adata[~adata.obs["predicted_doublet"]].copy()
         print(f"✅ Remaining cells: {adata.n_obs}")
         
@@ -215,6 +310,153 @@ def filter_invalid_samples(obj):
     return obj
 
 # ----------------------------
+# Helper MAD
+# ----------------------------
+
+def mad_thresholds(series, nmads, direction="both"):
+    """
+    Compute MAD-based thresholds for automatic QC filtering.
+
+    direction:
+    "both": remove low and high MAD outliers
+    "high": remove only high outliers (e.g. pct_counts_mt)
+    "low":  remove only low outliers
+    """
+    import numpy as np
+    med = np.median(series)
+    mad = np.median(np.abs(series - med))
+    if mad == 0:
+        # fallback: no filtering
+        return None, None
+
+    lower = med - nmads * mad
+    upper = med + nmads * mad
+
+    if direction == "high":
+        return None, upper
+    if direction == "low":
+        return lower, None
+    return lower, upper
+
+# ----------------------------
+# Helper qc filtering
+# ----------------------------
+def apply_qc_filtering(adata, cfg_preproc):
+    """
+    Perform QC filtering PER CARTRIDGE (per source_file), similarly to how
+    doublet removal is done per group.
+
+    This expects QC metrics already computed:
+    n_genes_by_counts, total_counts, pct_counts_mt, pct_counts_ribo, pct_counts_hb
+
+    Config keys used:
+    qc.mode: "auto" or "manual"
+    qc.nmads
+    qc.min_genes, max_genes, min_counts, max_counts, max_mito, max_ribo, max_hb
+    """
+
+    mode = cfg_preproc.get("mode", "auto")
+    nmads = cfg_preproc.get("nmads", 5)
+
+    print(f"🔎 QC filtering mode = {mode} (per cartridge)")
+    print("📦 Grouping by 'source_file'…")
+
+    # --- determine groups ---
+    if "source_file" not in adata.obs.columns:
+        print("⚠️ No 'source_file' in .obs — running QC on full dataset as one group.")
+        groups = {"all": adata.obs_names}
+    else:
+        groups = adata.obs.groupby("source_file").indices
+
+    keep_mask = np.zeros(adata.n_obs, dtype=bool)
+
+    # helper for MAD thresholds
+    def mad_thresholds(series, nmads, direction="both"):
+        med = np.median(series)
+        mad = np.median(np.abs(series - med))
+        if mad == 0 or np.isnan(mad):
+            return (None, None)
+        lo = med - nmads * mad
+        hi = med + nmads * mad
+        if direction == "high":
+            return (None, hi)
+        if direction == "low":
+            return (lo, None)
+        return (lo, hi)
+
+    for src, idx in groups.items():
+        print(f"\n📦 Processing cartridge: {src} ({len(idx)} cells)")
+        sub = adata[idx, :]
+        df = sub.obs
+
+        # ------------------------------
+        # MANUAL MODE
+        # ------------------------------
+        if mode == "manual":
+            print("  • manual QC thresholds from config")
+            mask = np.ones(sub.n_obs, dtype=bool)
+
+            def apply_manual(metric, cfg_key, direction="both"):
+                val = cfg_preproc.get(cfg_key)
+                if val is None:
+                    return
+                arr = df[metric].values
+                if direction in ("both", "low"):
+                    mask &= arr >= val
+                if direction in ("both", "high"):
+                    mask &= arr <= val
+
+            apply_manual("n_genes_by_counts", "min_genes", "low")
+            apply_manual("n_genes_by_counts", "max_genes", "high")
+            apply_manual("total_counts", "min_counts", "low")
+            apply_manual("total_counts", "max_counts", "high")
+            apply_manual("pct_counts_mt", "max_mito", "high")
+            apply_manual("pct_counts_ribo", "max_ribo", "high")
+            apply_manual("pct_counts_hb", "max_hb", "high")
+
+            removed = (~mask).sum()
+            print(f"  → removed {removed} cells ({removed/sub.n_obs:.1%})")
+            keep_mask[idx] = mask
+            continue
+
+        # ------------------------------
+        # AUTO MODE (MAD-based)
+        # ------------------------------
+        print(f"  • auto MAD QC (nmads={nmads})")
+
+        thresholds = {}
+
+        # two-sided metrics
+        for m in ["log1p_total_counts", "log1p_n_genes_by_counts", "pct_counts_in_top_20_genes"]:
+            thresholds[m] = mad_thresholds(df[m].values, nmads, "both")
+
+        # one-sided (high) metrics
+        for m in ["pct_counts_mt", "pct_counts_ribo", "pct_counts_hb"]:
+            thresholds[m] = mad_thresholds(df[m].values, nmads, "high")
+
+        for m, (lo, hi) in thresholds.items():
+            print(f"    {m}: low={lo}, high={hi}")
+
+        mask = np.ones(sub.n_obs, dtype=bool)
+        for m, (lo, hi) in thresholds.items():
+            arr = df[m].values
+            if lo is not None:
+                mask &= arr >= lo
+            if hi is not None:
+                mask &= arr <= hi
+
+        removed = (~mask).sum()
+        print(f"  → removed {removed} cells ({removed/sub.n_obs:.1%})")
+
+        keep_mask[idx] = mask
+
+    total_removed = (~keep_mask).sum()
+    print(f"\n🧹 TOTAL removed across all cartridges: {total_removed} / {adata.n_obs} ({total_removed/adata.n_obs:.1%})")
+
+    return adata[keep_mask, :].copy()
+
+
+# ----------------------------
 # CPU and GPU pipelines
 # ----------------------------
 def run_cpu_pipeline(adata, cfg):
@@ -234,21 +476,25 @@ def run_cpu_pipeline(adata, cfg):
     print("🧠 Running CPU-based Scanpy preprocessing...")
 
     p = cfg["params"]
+    # Define QC gene groups
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    adata.var["ribo"] = adata.var_names.str.upper().str.startswith(("RPS", "RPL"))
+    adata.var["hb"] = adata.var_names.str.upper().str.contains("^HB[^(P)]")
+
+    # Compute QC metrics
+    sc.pp.calculate_qc_metrics(
+        adata,
+        qc_vars=["mt", "ribo", "hb"],
+        percent_top=[20],
+        log1p=True,
+        inplace=True,
+    )
+    
+    # fitlering step
+    adata = apply_qc_filtering(adata, p)
+    
     sc.pp.filter_cells(adata, min_genes=p["min_genes"])
     sc.pp.filter_genes(adata, min_cells=p["min_cells"])
-    
-    # Compute mitochondrial gene fraction (%)
-    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
-    sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True)
-
-    if "mt_pct" in p and p["mt_pct"] is not None:
-        before = adata.n_obs
-        adata = adata[adata.obs["pct_counts_mt"] < p["mt_pct"], :].copy()
-        after = adata.n_obs
-        print(f"🧹 Filtered {before - after} cells with pct_counts_mt ≥ {p['mt_pct']}%")
-    else:
-        print("ℹ️ No mitochondrial filtering applied (mt_pct not set in config)")
-
 
     # Optionally store raw counts
     if cfg.get("store_raw_counts", False):
@@ -256,7 +502,7 @@ def run_cpu_pipeline(adata, cfg):
         adata.layers["counts"] = adata.X.copy()
 
     # doublets
-    if cfg["preprocessing"].get("doublets", {}).get("enabled", False):
+    if cfg.get("doublets", {}).get("enabled", False):
         adata = detect_doublets(adata, cfg)    
     
     # Normalization and feature selection
@@ -353,52 +599,71 @@ def run_gpu_pipeline(adata, cfg):
     else:
         adata.X = np.array(adata.X, dtype=np.float32)
 
+    # Define QC gene groups
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    adata.var["ribo"] = adata.var_names.str.upper().str.startswith(("RPS", "RPL"))
+    adata.var["hb"] = adata.var_names.str.upper().str.contains("^HB[^(P)]")
+
+    # Compute QC metrics
+    sc.pp.calculate_qc_metrics(
+        adata,
+        qc_vars=["mt", "ribo", "hb"],
+        percent_top=[20],
+        log1p=True,
+        inplace=True,
+    )
+    
+    # fitlering step
+    adata = apply_qc_filtering(adata, p)
+
     rsc.get.anndata_to_GPU(adata)
     rsc.pp.filter_cells(adata, min_genes=p["min_genes"])
     rsc.pp.filter_genes(adata, min_cells=p["min_cells"])
     
     # adjusted for rapids-singlecell (different function compared to scanpy)
     # Detect mitochondrial genes
-    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
-    mito_genes = adata.var["mt"].values
+    # adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    # mito_genes = adata.var["mt"].values
 
-    if mito_genes.sum() > 0:
-        print(f"🧬 Found {mito_genes.sum()} mitochondrial genes — calculating pct_counts_mt (GPU)...")
+    # if mito_genes.sum() > 0:
+    #     print(f"🧬 Found {mito_genes.sum()} mitochondrial genes — calculating pct_counts_mt (GPU)...")
 
-        # Sum counts across mito and total features using CuPy (stay on GPU)
-        if issparse(adata.X):
-            mito_counts = cp.asarray(adata[:, mito_genes].X.sum(axis=1)).ravel()
-            total_counts = cp.asarray(adata.X.sum(axis=1)).ravel()
-        else:
-            mito_counts = adata.X[:, mito_genes].sum(axis=1)
-            total_counts = adata.X.sum(axis=1)
+    #     # Sum counts across mito and total features using CuPy (stay on GPU)
+    #     if issparse(adata.X):
+    #         mito_counts = cp.asarray(adata[:, mito_genes].X.sum(axis=1)).ravel()
+    #         total_counts = cp.asarray(adata.X.sum(axis=1)).ravel()
+    #     else:
+    #         mito_counts = adata.X[:, mito_genes].sum(axis=1)
+    #         total_counts = adata.X.sum(axis=1)
 
-        # Avoid division by zero
-        total_counts = cp.where(total_counts == 0, 1, total_counts)
-        pct_counts_mt = (mito_counts / total_counts) * 100.0
+    #     # Avoid division by zero
+    #     total_counts = cp.where(total_counts == 0, 1, total_counts)
+    #     pct_counts_mt = (mito_counts / total_counts) * 100.0
 
-        # Bring result to CPU (AnnData.obs is pandas)
-        adata.obs["pct_counts_mt"] = cp.asnumpy(pct_counts_mt)
-    else:
-        adata.obs["pct_counts_mt"] = 0.0
-        print("⚠️ No mitochondrial genes found (no 'MT-' prefix detected)")
+    #     # Bring result to CPU (AnnData.obs is pandas)
+    #     adata.obs["pct_counts_mt"] = cp.asnumpy(pct_counts_mt)
+    # else:
+    #     adata.obs["pct_counts_mt"] = 0.0
+    #     print("⚠️ No mitochondrial genes found (no 'MT-' prefix detected)")
 
-    # Optional filtering based on mitochondrial content
-    if "mt_pct" in p and p["mt_pct"] is not None:
-        before = adata.n_obs
-        keep_idx = adata.obs["pct_counts_mt"] < p["mt_pct"]
-        adata = adata[keep_idx, :].copy()
-        after = adata.n_obs
-        print(f"🧹 Filtered {before - after} cells with pct_counts_mt ≥ {p['mt_pct']}%")
-    else:
-        print("ℹ️ No mitochondrial filtering applied (mt_pct not set in config)")
+    # # Optional filtering based on mitochondrial content
+    # if "mt_pct" in p and p["mt_pct"] is not None:
+    #     before = adata.n_obs
+    #     keep_idx = adata.obs["pct_counts_mt"] < p["mt_pct"]
+    #     adata = adata[keep_idx, :].copy()
+    #     after = adata.n_obs
+    #     print(f"🧹 Filtered {before - after} cells with pct_counts_mt ≥ {p['mt_pct']}%")
+    # else:
+    #     print("ℹ️ No mitochondrial filtering applied (mt_pct not set in config)")
 
     if cfg.get("store_raw_counts", False):
         print("💾 Storing raw counts in adata.layers['counts']")
         adata.layers["counts"] = adata.X.copy()
-        rsc.get.anndata_to_CPU(adata, layers=["counts"])
+        rsc.get.anndata_to_CPU(adata, layer="counts")
 
-    if cfg["preprocessing"].get("doublets", {}).get("enabled", False):
+    print("Layers available before doublet detection:", adata.layers.keys())
+
+    if cfg.get("doublets", {}).get("enabled", False):
         adata = detect_doublets(adata, cfg)
 
     rsc.pp.normalize_total(adata, target_sum=1e4)
@@ -510,6 +775,7 @@ def preprocess_mdata(mdata, cfg, use_gpu):
         from muon import prot as pt
         print("💧 Preprocessing protein modality (CLR normalization)...")
         prot = mdata.mod["prot"]
+        prot.layers["prot_counts"] = prot.X.copy()
         prot.X = prot.X.astype("float64")
         pt.pp.clr(prot)
         sc.pp.scale(prot, max_value=10)

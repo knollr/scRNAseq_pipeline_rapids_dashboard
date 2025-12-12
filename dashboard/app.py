@@ -16,6 +16,17 @@ import dash
 from dash import html, dcc
 import scanpy as sc
 import muon as mu
+import pandas as pd
+
+# ---------------------------------------------------------------------
+# Craete DataWrapper class as simple container for AnnData and MuData
+# ---------------------------------------------------------------------
+class DataWrapper:
+    def __init__(self, adata, mdata=None):
+        self.adata = adata       # the AnnData to use for all RNA plots
+        self.mdata = mdata       # full MuData object if available
+        self.is_mdata = mdata is not None
+
 
 # ---------------------------------------------------------------------
 # Load annotated dataset
@@ -23,19 +34,30 @@ import muon as mu
 RESULTS_DIR = "/pipeline/results/latest"
 ANNOT_PATH_H5AD = os.path.join(RESULTS_DIR, "merged_annotated.h5ad")
 ANNOT_PATH_H5MU = os.path.join(RESULTS_DIR, "merged_annotated.h5mu")
+ANNOT_PATH_CSV = os.path.join(RESULTS_DIR, "doublet_qc_dataframe_pre_filtering.csv")
 
 adata = None
 if os.path.exists(ANNOT_PATH_H5MU):
     print(f"📂 Loading MuData from {ANNOT_PATH_H5MU}")
     mdata = mu.read(ANNOT_PATH_H5MU)
-    adata = mdata.mod["rna"]  # Focus on RNA modality
+    adata = mdata.mod["rna"]  
+    data = DataWrapper(adata=adata, mdata=mdata) # wrap both
 elif os.path.exists(ANNOT_PATH_H5AD):
     print(f"📂 Loading AnnData from {ANNOT_PATH_H5AD}")
     adata = sc.read_h5ad(ANNOT_PATH_H5AD)
+    data = DataWrapper(adata=adata, mdata=None)  # only adata
 else:
     sys.exit(f"❌ No merged_annotated.h5ad or .h5mu found in {RESULTS_DIR}")
+    
+doublet_df = pd.read_csv(
+    ANNOT_PATH_CSV,
+    index_col="cell_id"
+)
 
-print(f"✅ Loaded dataset with {adata.n_obs} cells × {adata.n_vars} genes.")
+data.doublet_df = doublet_df   # attach to your DataLoader object    
+
+print(f"✅ Loaded dataset with {data.adata.n_obs} cells × {data.adata.n_vars} genes.")
+
 
 # ---------------------------------------------------------------------
 # Import dashboard components
@@ -85,20 +107,20 @@ app.layout = html.Div(
 )
 def render_tab(tab):
     if tab == "tab-qc":
-        return qc_plots.layout(adata)
+        return qc_plots.layout(data)
     elif tab == "tab-cluster":
-        return clustering_umap.layout(adata)
+        return clustering_umap.layout(data)
     elif tab == "tab-celltype":
-        return celltype_summary.layout(adata)
+        return celltype_summary.layout(data)
     else:
         return html.Div("Select a tab to view content.")
 
 # ---------------------------------------------------------------------
 # Register component callbacks
 # ---------------------------------------------------------------------
-qc_plots.register_callbacks(app, adata)
-clustering_umap.register_callbacks(app, adata)
-celltype_summary.register_callbacks(app, adata)
+qc_plots.register_callbacks(app, data)
+clustering_umap.register_callbacks(app, data)
+celltype_summary.register_callbacks(app, data)
 
 # ---------------------------------------------------------------------
 # Run dashboard
