@@ -8,7 +8,7 @@ A **fast, GPU-accelerated single-cell RNA-seq & multi-omics analysis pipeline** 
 - 🔗 **Merging of multiple datasets** for integrated analysis  
 - 🔬 **Multi-omics support**: RNA and protein (CITE/ADT)
 - 🧪 **Automated cell type annotation**: Cell type annotation using CellTypist 
-- 📊 **Interactive dashboard** for visual exploration and QC (planned)  
+- 📊 **Interactive dashboard** for visual exploration and QC 
 - 🧩 Modular **Snakemake workflow** for reproducibility  
 
 ### 🚀 Quick Start
