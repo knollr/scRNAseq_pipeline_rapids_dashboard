@@ -257,21 +257,32 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
                 "resolution": res,
                 "n_iterations": 2,
                 "key_added": f"leiden_{res}" if not wnn_key else f"leiden_{res}_{wnn_key}",
-                "neighbors_key": wnn_key
             }
 
+            # 🔑 GRAPH SELECTION
+            if is_mudata and wnn_key:
+                kwargs["obsp"] = f"{wnn_key}_connectivities"
+            elif wnn_key:
+                kwargs["neighbors_key"] = wnn_key
+
             if not use_gpu:
-                kwargs["flavor"] = "igraph"  # only for CPU, does not work with rsc
+                kwargs["flavor"] = "igraph"
                 kwargs["directed"] = False
+
             leiden_func(obj, **kwargs)
 
-        if run_louvain:    
-            louvain_func(
-                obj,
-                resolution=res,
-                key_added=f"louvain_{res}" if not wnn_key else f"louvain_{res}_{wnn_key}",
-                neighbors_key=wnn_key
-            )
+        if run_louvain:
+            kwargs = {
+                "resolution": res,
+                "key_added": f"louvain_{res}" if not wnn_key else f"louvain_{res}_{wnn_key}",
+            }
+
+            if is_mudata and wnn_key:
+                kwargs["obsp"] = f"{wnn_key}_connectivities"
+            elif wnn_key:
+                kwargs["neighbors_key"] = wnn_key
+
+            louvain_func(obj, **kwargs)
 
 # ----------------------------
 # Helper: sample filtering

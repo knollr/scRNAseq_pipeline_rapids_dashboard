@@ -197,7 +197,7 @@ def register_callbacks(app, data):
             fig_violin.update_layout(
                 xaxis_title="Source file",
                 yaxis_title=qc_metric,
-                height=400,
+                height=500,
                 margin=dict(l=40, r=40, t=80, b=40),
             )
         else:
@@ -224,7 +224,7 @@ def register_callbacks(app, data):
                     template="plotly_white",
                 )
                 fig_bar.update_layout(
-                    height=400, margin=dict(l=40, r=40, t=80, b=40)
+                    height=500, margin=dict(l=40, r=40, t=80, b=40)
                 )
             else:
                 fig_bar = px.bar(title="source_file missing")
@@ -246,7 +246,7 @@ def register_callbacks(app, data):
                 )
                 fig_bar.update_layout(
                     barmode="stack",
-                    height=400,
+                    height=500,
                     margin=dict(l=40, r=40, t=80, b=40),
                 )
             else:
@@ -402,7 +402,7 @@ def register_callbacks(app, data):
             fig_placeholder.update_traces(width=0.8)
 
             fig_placeholder.update_layout(
-                height=450,
+                height=500,
                 margin=dict(l=40, r=40, t=80, b=40),
             )
 
@@ -410,7 +410,7 @@ def register_callbacks(app, data):
             fig_placeholder = px.scatter(
                 title="No doublet dataframe found",
                 template="plotly_white",
-                height=400,
+                height=500,
             )
 
         return fig_violin, fig_bar, fig_umap, fig_placeholder
