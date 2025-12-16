@@ -4,3 +4,5 @@ data/
 results/
 .snakemake/
 singularity/
+dashboard/components/__pycache__/
+scripts/__pycache__/
