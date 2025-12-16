@@ -15,7 +15,7 @@ Stores per-model:
 - confidence scores
 - majority-voting labels (if enabled)
 """
-
+import scripts.silence_warnings
 import argparse
 import os
 import yaml

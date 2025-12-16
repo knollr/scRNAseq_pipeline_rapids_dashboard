@@ -9,8 +9,7 @@ Supports:
 - .rds/.h5Seurat : Seurat object (converted via SeuratDisk)
 - .h5mu       : MuData (multi-modal)
 """
-#import scripts.silence_warnings
-
+import scripts.silence_warnings
 import os
 import sys
 import scanpy as sc

@@ -1,4 +1,4 @@
-# scripts/silence_warnings.py
+# components/silence_warnings_app.py
 """
 Silence known harmless warnings from Python and third-party libraries.
 Import this at the top of every Snakemake script to keep console output clean.
@@ -23,26 +23,18 @@ warnings.filterwarnings(
     message=".*The default of observed=False is deprecated.*"
 )
 
+# --- MuData FutureWarnings about .update() ---
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=".*From 0\\.4 \.update\\(\\) will not pull obs/var columns.*"
+)
 
 # --- anndata / scanpy __version__ FutureWarning ---
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
     message=".*`__version__` is deprecated.*"
-)
-
-# --- Muon CSC conversion warning ---
-warnings.filterwarnings(
-    "ignore",
-    category=UserWarning,
-    message=".*adata.X is sparse but not in CSC format.*"
-)
-
-# --- Scanpy obsm_keys deprecation ---
-warnings.filterwarnings(
-    "ignore",
-    category=FutureWarning,
-    message=".*AnnData\\.obsm_keys is deprecated.*"
 )
 
 # --- Prevent propagation to stderr in spawned processes ---

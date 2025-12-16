@@ -16,7 +16,7 @@ Features:
 - Configurable storage of raw counts (adata.layers["counts"])
 - Compatible with Snakemake and CLI
 """
-#import scripts.silence_warnings
+import scripts.silence_warnings
 import argparse
 import yaml
 import scanpy as sc
@@ -28,59 +28,31 @@ import scipy.sparse as sp
 # =====================================
 # Helper: Doublet detection (Scrublet or Solo)
 # =====================================
-def detect_doublets(adata, cfg):
+def detect_doublets(adata, cfg, use_gpu = False):
     """
     Run doublet detection per cartridge using Scrublet (CPU) or Solo (GPU).
 
     If using RAPIDS (GPU), moves data safely to CPU using rsc.get.anndata_to_CPU().
     Expects .obs['source_file'] to label cartridges.
     """
-    import numpy as np
     import pandas as pd
-    import scipy.sparse as sp
 
+    # get parameters from config file
     dbl_cfg = cfg["doublets"]
     enabled = dbl_cfg.get("enabled", False)
     if not enabled:
         print("🧩 Doublet detection disabled in config.")
         return adata
-
     method = dbl_cfg.get("method", "scrublet")
-
     rate = float(dbl_cfg["doublet_rate"])
     sim_ratio = float(dbl_cfg.get("sim_doublet_ratio", 2.0))
     print(f"🔧 Running {method.upper()} doublet detection (rate={rate:.1%})")
 
-    # --- Move GPU-backed data to CPU safely ---
-    if use_gpu:
-        try:
-            import rapids_singlecell as rsc
-            print("📤 Moving AnnData from GPU to CPU for doublet detection...")
-            
-            ### test
-            print("⚠️Type of adata.X:", type(adata.X))
-            ### end 
-            
-            adata_cpu = adata.copy()
-            
-            ### test
-            print("Type of pre conversion adata_cpu.X:", type(adata_cpu.X))
-            ### end 
-            
-            
-            adata_cpu = rsc.get.anndata_to_CPU(adata_cpu)
-            
-            ### test
-            print("Type of post conversion adata_cpu.X:", type(adata_cpu.X))
-            ### end 
-        except Exception as e:
-            print(f"⚠️ Could not convert with rsc.get.anndata_to_CPU(): {e}")
-            adata_cpu = adata.copy()
-    else:
-        adata_cpu = adata.copy()
+    adata_cpu = adata.copy()
         
     print("adata_cpu type after conversion:", type(adata_cpu))
-
+    
+    # loop over cartridges and run doublet detection with selected method
     scores, preds = [], []
     if "source_file" not in adata_cpu.obs.columns:
         print("⚠️ No 'source_file' column found in .obs — running on full dataset.")
@@ -92,20 +64,25 @@ def detect_doublets(adata, cfg):
         sub = adata_cpu[idx, :]
         print(f"\n📦 Processing cartridge: {src} ({sub.n_obs} cells)")
 
-        if method == "scrublet":
-            sub = sc.pp.scrublet(
-                    sub,
-                    expected_doublet_rate=rate,
-                    sim_doublet_ratio=sim_ratio,
-                    copy = True
-            )
+        if use_gpu and method.lower() == "scrublet":
+            print("⚡ Using RAPIDS Scrublet on GPU")
+            import rapids_singlecell as rsc
+            rsc.get.anndata_to_GPU(adata_cpu)
+            sub_gpu = adata_cpu[idx, :]
+            sub_gpu = rsc.pp.scrublet(sub_gpu, expected_doublet_rate=rate, sim_doublet_ratio=sim_ratio, copy=True)
+            scs = sub_gpu.obs["doublet_score"] 
+            preds_local = sub_gpu.obs["predicted_doublet"]
+            
+        elif method.lower() == "scrublet":
+            print("🧠 Using Scanpy Scrublet on CPU")
+            sub = sc.pp.scrublet(sub, expected_doublet_rate=rate, sim_doublet_ratio=sim_ratio, copy=True)
             scs = sub.obs["doublet_score"] 
             preds_local = sub.obs["predicted_doublet"] 
-        # elif method == "solo":
+
+        # elif method.lower() == "solo":
+        #     print("⚡ Using SOLO doublet detection on GPU")
         #     from scvi.model import SOLO
         #     import torch
-
-        #     # Setup SOLO model
         #     solo = SOLO(sub, expected_doublet_rate=rate)
         #     solo.train(max_epochs=20, use_gpu=torch.cuda.is_available())
         #     scs = solo.get_doublet_scores()
@@ -236,7 +213,8 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
     if use_gpu:
         import rapids_singlecell as rsc
         if run_leiden:
-            leiden_func = rsc.tl.leiden
+            #leiden_func = rsc.tl.leiden
+            leiden_func = sc.tl.leiden  # use scanpy's leiden even on GPU beacuse leiden on rapids-singlecell has issues (too many clusters)
         if run_louvain:
             louvain_func = rsc.tl.louvain
         backend = "⚡ RAPIDS (GPU)"
@@ -251,6 +229,10 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
     if is_mudata and wnn_key:
         print(f"🧬 Using multimodal neighbors graph: '{wnn_key}'")
 
+    if use_gpu:
+        import rapids_singlecell as rsc 
+        rsc.get.anndata_to_CPU(obj) 
+    
     for res in resolutions:
         if run_leiden:
             kwargs = {
@@ -265,12 +247,17 @@ def run_clusterings(obj, resolutions, use_gpu=False, wnn_key=None, cfg=None):
             elif wnn_key:
                 kwargs["neighbors_key"] = wnn_key
 
-            if not use_gpu:
-                kwargs["flavor"] = "igraph"
-                kwargs["directed"] = False
+            # if not use_gpu: # just execute as we fall back to leiden due to issues
+            kwargs["flavor"] = "igraph"
+            #kwargs["directed"] = False
 
             leiden_func(obj, **kwargs)
-
+            
+    if use_gpu:
+        import rapids_singlecell as rsc 
+        rsc.get.anndata_to_GPU(obj) 
+            
+    for res in resolutions:
         if run_louvain:
             kwargs = {
                 "resolution": res,
@@ -470,7 +457,7 @@ def apply_qc_filtering(adata, cfg_preproc):
 # ----------------------------
 # CPU and GPU pipelines
 # ----------------------------
-def run_cpu_pipeline(adata, cfg):
+def run_cpu_pipeline(adata, cfg, run_clustering=True):
     """
     Filter, normalize, and preprocess RNA data using Scanpy.
 
@@ -514,7 +501,7 @@ def run_cpu_pipeline(adata, cfg):
 
     # doublets
     if cfg.get("doublets", {}).get("enabled", False):
-        adata = detect_doublets(adata, cfg)    
+        adata = detect_doublets(adata, cfg, use_gpu=False)    
     
     # Normalization and feature selection
     sc.pp.normalize_total(adata, target_sum=1e4)
@@ -578,11 +565,12 @@ def run_cpu_pipeline(adata, cfg):
     # Neighborhood graph, UMAP, clustering
     sc.pp.neighbors(adata, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs"])
     sc.tl.umap(adata, n_components=p["umap_n_components"])
-    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], cfg=cfg)
+    if run_clustering:
+        run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], cfg=cfg)
     return adata
 
 
-def run_gpu_pipeline(adata, cfg):
+def run_gpu_pipeline(adata, cfg, run_clustering=True):
     """
     GPU-accelerated preprocessing using rapids-singlecell.
     """
@@ -626,10 +614,8 @@ def run_gpu_pipeline(adata, cfg):
     
     # fitlering step
     adata = apply_qc_filtering(adata, p)
-
-    rsc.get.anndata_to_GPU(adata)
-    rsc.pp.filter_cells(adata, min_genes=p["min_genes"])
-    rsc.pp.filter_genes(adata, min_cells=p["min_cells"])
+    sc.pp.filter_cells(adata, min_genes=p["min_genes"])
+    sc.pp.filter_genes(adata, min_cells=p["min_cells"])
     
     # adjusted for rapids-singlecell (different function compared to scanpy)
     # Detect mitochondrial genes
@@ -670,12 +656,14 @@ def run_gpu_pipeline(adata, cfg):
     if cfg.get("store_raw_counts", False):
         print("💾 Storing raw counts in adata.layers['counts']")
         adata.layers["counts"] = adata.X.copy()
-        rsc.get.anndata_to_CPU(adata, layer="counts")
+        #rsc.get.anndata_to_CPU(adata, layer="counts")   # was this necessary for something?
 
     print("Layers available before doublet detection:", adata.layers.keys())
 
     if cfg.get("doublets", {}).get("enabled", False):
-        adata = detect_doublets(adata, cfg)
+        adata = detect_doublets(adata, cfg, use_gpu=True)
+        
+    rsc.get.anndata_to_GPU(adata)
 
     rsc.pp.normalize_total(adata, target_sum=1e4)
     rsc.pp.log1p(adata)
@@ -720,11 +708,12 @@ def run_gpu_pipeline(adata, cfg):
 
     # --- 2️⃣ Identify and safely remove all-zero genes ---
     if issparse(adata.X):
-        # Count nonzero entries per column
-        X_pos = (adata.X > 0).astype(cp.float32)
-        nonzero_genes = cp.ravel(X_pos.sum(axis=0)) > 0
+        # Sum over rows to get non-zero counts per gene
+        gene_counts = cp.asarray(adata.X.sum(axis=0)).ravel()  # ensure 1D CuPy array
+        nonzero_genes = gene_counts > 0
     else:
-        nonzero_genes = cp.ravel((adata.X > 0).sum(axis=0)) > 0
+        gene_counts = cp.ravel((adata.X > 0).sum(axis=0))
+        nonzero_genes = gene_counts > 0
 
     n_total = adata.shape[1]
     n_removed = int((~nonzero_genes).sum())
@@ -735,24 +724,33 @@ def run_gpu_pipeline(adata, cfg):
             print(f"🚨 All {n_total} genes appear to be zero — skipping removal to avoid empty dataset")
         else:
             print(f"🧬 Removing {n_removed} all-zero genes (keeping {n_keep})")
-            # Convert mask to CPU (AnnData slicing requires NumPy)
             mask_cpu = cp.asnumpy(nonzero_genes)
             adata = adata[:, mask_cpu].copy()
     else:
         print("✅ No all-zero genes found")
 
-    # Optional sanity check
     print(f"✅ Matrix shape after cleanup: {adata.shape}")
+    
+    import cupyx.scipy.sparse as cusparse
+    print(type(adata.X), issparse(adata.X))
         
-    adata.layers["norm_data"] = adata.X.copy()    
+    adata.layers["norm_data"] = adata.X.copy()
+    print("Before HVG:", adata.shape, type(adata.X), getattr(adata.X, 'nnz', 'dense')) 
     rsc.pp.highly_variable_genes(adata, n_top_genes=p["n_top_genes"])
+    print("After HVG")
     rsc.pp.scale(adata)
+    print("After scaling")
     rsc.tl.pca(adata, n_comps=p["n_pcs"])
+    print("After PCA")
     rsc.pp.neighbors(adata, n_neighbors=p["n_neighbors"], n_pcs=p["n_pcs"])
     rsc.tl.umap(adata)
-    run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=True, cfg=cfg)
-    rsc.get.anndata_to_CPU(adata, convert_all = True)
-    
+
+    print("run_clustering:", run_clustering)
+    if run_clustering:
+        print("🏃 Running clustering (GPU)...")
+        run_clusterings(adata, resolutions=[0.2, 0.4, 0.6, 0.8, 1.0], use_gpu=True, cfg=cfg)
+    rsc.get.anndata_to_CPU(adata, convert_all=True)
+
     return adata
 
 
@@ -773,9 +771,9 @@ def preprocess_mdata(mdata, cfg, use_gpu):
     # RNA modality
     print("🧬 Preprocessing RNA modality...")
     if use_gpu:
-        mdata.mod["rna"] = run_gpu_pipeline(mdata.mod["rna"], cfg)
+        mdata.mod["rna"] = run_gpu_pipeline(mdata.mod["rna"], cfg, run_clustering=False)
     else:
-        mdata.mod["rna"] = run_cpu_pipeline(mdata.mod["rna"], cfg)
+        mdata.mod["rna"] = run_cpu_pipeline(mdata.mod["rna"], cfg, run_clustering=False)
 
     remaining_cells = mdata.mod['rna'].obs_names
     mdata.mod['prot'] = mdata.mod['prot'][remaining_cells, :].copy()

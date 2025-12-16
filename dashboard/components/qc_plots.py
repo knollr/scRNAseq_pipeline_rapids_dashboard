@@ -302,7 +302,7 @@ def register_callbacks(app, data):
                         + df.loc[plot_df.index, "Sample_Name"].astype(str)
                     )
                     map_colors = None
-                    title = "UMAP colored by source_file + Sample_Name"
+                    title = "3️⃣ UMAP colored by source_file + Sample_Name"
                 else:
                     plot_df["color"] = df.loc[plot_df.index, "source_file"].astype(str)
                     map_colors = color_map

@@ -22,9 +22,15 @@ from dash import html, dcc, Input, Output
 # ---------------------------------------------------------------------
 def layout(data):
     adata = data.adata
+    mdata = getattr(data, "mdata", None)
+
+    if mdata is not None:
+        obs = mdata.obs
+    else:
+        obs = adata.obs
 
     cluster_cols = [
-        c for c in adata.obs.columns
+        c for c in obs.columns
         if c.startswith("leiden") or c.startswith("louvain")
     ]
     if not cluster_cols:
@@ -160,15 +166,15 @@ def register_callbacks(app, data):
 
         pbmc_marker_genes = [
             # T cells
-            "CD3D", "CD3E","IL7R","LTB",
+            "CD3D", "CD3E","IL7R","LTB",  
             # CD8 / cytotoxic
-            "NKG7","GNLY","GZMB",
+            "NKG7","GNLY","GZMB", "CD8A",
             # NK cells
-            "KLRD1","FCGR3A",
+            "KLRD1","FCGR3A", "KLRF1", 
             # B cells
             "MS4A1","CD79A",
             # Monocytes (CD14+ / FCGR3A+)
-            "LYZ","S100A8","S100A9","CTSD",
+            "LYZ","S100A8","S100A9","CTSD", "CD14", 
             # Dendritic cells
             "FCER1A","CST3",
             # Platelets
@@ -199,7 +205,10 @@ def register_callbacks(app, data):
     )
     def update_plots(cluster_col, modality, feature, log1p_toggle):
 
-        df = adata.obs.copy()
+        if hasattr(data, "mdata") and data.mdata is not None:
+            df = data.mdata.obs.copy()
+        else:
+            df = adata.obs.copy()
         log1p = "log1p" in log1p_toggle
 
         # ------------------------------------------------------------------

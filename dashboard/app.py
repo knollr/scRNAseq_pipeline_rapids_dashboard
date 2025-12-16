@@ -9,7 +9,7 @@ Run inside Singularity container:
 Assumes Snakemake created the symlink:
     results/latest/merged_annotated.(h5ad|h5mu)
 """
-
+import components.silence_warnings_app
 import os
 import sys
 import dash
@@ -17,6 +17,7 @@ from dash import html, dcc
 import scanpy as sc
 import muon as mu
 import pandas as pd
+import argparse
 
 # ---------------------------------------------------------------------
 # Craete DataWrapper class as simple container for AnnData and MuData
@@ -28,10 +29,35 @@ class DataWrapper:
         self.is_mdata = mdata is not None
 
 
+
+# ---------------------------------------------------------------------
+# Parse command-line arguments
+# ---------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Single-cell dashboard")
+parser.add_argument(
+    "--results-dir",
+    type=str,
+    default=None,
+    help="Path to results directory (defaults to results/latest)",
+)
+args = parser.parse_args()
+
+# ---------------------------------------------------------------------
+# Resolve results directory
+# ---------------------------------------------------------------------
+DEFAULT_RESULTS_DIR = "/pipeline/results/latest"
+
+RESULTS_DIR = (
+    args.results_dir
+    if args.results_dir is not None
+    else DEFAULT_RESULTS_DIR
+)
+
+print(f"📂 Using results directory: {RESULTS_DIR}")
+
 # ---------------------------------------------------------------------
 # Load annotated dataset
 # ---------------------------------------------------------------------
-RESULTS_DIR = "/pipeline/results/latest"
 ANNOT_PATH_H5AD = os.path.join(RESULTS_DIR, "merged_annotated.h5ad")
 ANNOT_PATH_H5MU = os.path.join(RESULTS_DIR, "merged_annotated.h5mu")
 ANNOT_PATH_CSV = os.path.join(RESULTS_DIR, "doublet_qc_dataframe_pre_filtering.csv")
