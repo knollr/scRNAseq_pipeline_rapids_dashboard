@@ -1,8 +1,8 @@
-__pycache__/
+__pycache__/*
 *.pyc
 data/
 results/
 .snakemake/
 singularity/
-dashboard/components/__pycache__/
-scripts/__pycache__/
+dashboard/components/__pycache__/*
+scripts/__pycache__/*
