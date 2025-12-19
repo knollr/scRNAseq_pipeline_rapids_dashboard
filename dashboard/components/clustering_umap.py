@@ -15,7 +15,102 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 from dash import html, dcc, Input, Output
+import tempfile
+import io
+import base64
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import scanpy as sc
+import os
+import plotly.express as px
 
+# ---------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------
+def get_top_markers(marker_df, cluster_col, top_n=3):
+    """
+    Extract top N marker genes per cluster
+    using explicit cluster_col match.
+    """
+
+    df = marker_df.copy()
+
+    df = df[df["cluster_col"] == cluster_col]
+
+    if df.empty:
+        raise ValueError(f"No markers found for {cluster_col}")
+
+    # Ensure cluster is string for consistency
+    df["cluster"] = df["cluster"].astype(str)
+
+    # Top N genes per cluster by avg_logFC
+    top = (
+        df.sort_values("avg_logFC", ascending=False)
+        .groupby("cluster", group_keys=False)
+        .head(top_n)
+    )
+
+    genes_by_cluster = (
+        top.groupby("cluster")["gene"]
+        .apply(list)
+        .to_dict()
+    )
+
+    return genes_by_cluster
+
+def prepare_dotplot_df(adata_rna, genes_by_cluster, cluster_col):
+    """
+    Returns a dataframe suitable for Plotly dotplot:
+    Columns: gene, cluster, mean_expr, fraction
+    """
+    import pandas as pd
+    import numpy as np
+
+    rows = []
+    for cluster, genes in genes_by_cluster.items():
+        cells_in_cluster = adata_rna.obs[cluster_col] == cluster
+        expr_sub = adata_rna[cells_in_cluster, genes].X
+        if not isinstance(expr_sub, np.ndarray):
+            expr_sub = expr_sub.toarray()
+
+        mean_expr = expr_sub.mean(axis=0)
+        frac = (expr_sub > 0).sum(axis=0) / expr_sub.shape[0]
+
+        for g, m, f in zip(genes, mean_expr, frac):
+            rows.append({"gene": g, "cluster": str(cluster), "mean_expr": m, "fraction": f})
+
+    df = pd.DataFrame(rows)
+    return df
+
+
+
+
+def plotly_dotplot(df, title="Dotplot"):
+    """
+    df: gene / cluster / mean_expr / fraction
+    """
+    fig = px.scatter(
+        df,
+        x="gene",
+        y="cluster",
+        size="fraction",
+        color="mean_expr",
+        color_continuous_scale="Viridis",
+        size_max=12,
+        text=None,
+        template="plotly_white",
+    )
+
+    fig.update_layout(
+        title=title,
+        xaxis_tickangle=-90,
+        xaxis=dict(tickfont=dict(size=10)),
+        yaxis=dict(autorange="reversed"),
+        height= max(500, 25 * df['cluster'].nunique()),
+        margin=dict(l=80, r=20, t=50, b=120),
+    )
+
+    return fig
 
 # ---------------------------------------------------------------------
 # Layout
@@ -40,13 +135,13 @@ def layout(data):
         # T cells
         "CD3D", "CD3E","IL7R","LTB",
         # CD8 / cytotoxic
-        "NKG7","GNLY","GZMB",
+        "NKG7","GNLY","GZMB", "CD8A",
         # NK cells
-        "KLRD1","FCGR3A",
+        "KLRD1","FCGR3A", "KLRF1",
         # B cells
         "MS4A1","CD79A",
         # Monocytes (CD14+ / FCGR3A+)
-        "LYZ","S100A8","S100A9","CTSD",
+        "LYZ","S100A8","S100A9","CTSD", "CD14", 
         # Dendritic cells
         "FCER1A","CST3",
         # Platelets
@@ -205,6 +300,7 @@ def register_callbacks(app, data):
     )
     def update_plots(cluster_col, modality, feature, log1p_toggle):
 
+        df = adata.obs.copy()
         if hasattr(data, "mdata") and data.mdata is not None:
             df = data.mdata.obs.copy()
         else:
@@ -301,13 +397,38 @@ def register_callbacks(app, data):
         fig_bar.update_layout(height=500)
 
         # ------------------------------------------------------------------
-        # P3: marker placeholder
+        # P3: cluster marker dotplot (PRECOMPUTED markers)
         # ------------------------------------------------------------------
-        fig_marker = px.scatter(
-            title="3️⃣ Cluster markers (precomputed – coming soon)",
-            template="plotly_white",
-        )
-        fig_marker.update_layout(height=500)
+        try:
+            # --- select RNA AnnData ---
+            if hasattr(data, "mdata") and data.mdata is not None:
+                adata_rna = data.mdata.mod["rna"]
+                obs = data.mdata.obs
+            else:
+                adata_rna = data.adata
+                obs = data.adata.obs
+
+            # --- ensure clustering exists on RNA adata ---
+            if cluster_col not in adata_rna.obs:
+                adata_rna.obs[cluster_col] = obs[cluster_col].astype(str)
+
+            # --- extract top markers ---
+            genes_by_cluster = get_top_markers(
+                marker_df=data.marker_df,
+                cluster_col=cluster_col,
+                top_n=3,
+            )
+
+            df_dot = prepare_dotplot_df(adata_rna, genes_by_cluster, cluster_col)
+            fig_marker = plotly_dotplot(df_dot, title=f"3️⃣ Top markers per {cluster_col}")
+
+
+        except Exception as e:
+            fig_marker = px.scatter(
+                title=f"3️⃣ Marker dotplot unavailable: {e}",
+                template="plotly_white",
+            )
+            fig_marker.update_layout(height=500)
 
         # ------------------------------------------------------------------
         # P4: feature expression UMAP

@@ -84,6 +84,26 @@ rule celltypist_annotation:
     script:
         "scripts/celltypist_annotation.py"
 
+
+# ----------------------------
+# Rule: export cluster markers (tidy CSV)
+# ----------------------------
+rule export_cluster_markers:
+    """
+    Compute marker genes for all Leiden/Louvain clusters and resolutions,
+    and export as tidy CSV for dashboard visualization.
+    Works for both .h5ad and .h5mu inputs.
+    """
+    input:
+        f"{results_dir}/merged_annotated{ext}"
+    output:
+        f"{results_dir}/cluster_markers_tidy.csv"
+    params:
+        top_n=20
+    script:
+        "scripts/export_cluster_markers.py"
+
+
 # ----------------------------
 # Rule: all
 # ----------------------------
@@ -92,4 +112,4 @@ rule all:
     Final target: single preprocessed dataset (h5ad or h5mu)
     """
     input:
-        f"{results_dir}/merged_annotated{ext}"
+        f"{results_dir}/cluster_markers_tidy.csv"

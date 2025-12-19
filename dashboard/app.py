@@ -61,6 +61,7 @@ print(f"📂 Using results directory: {RESULTS_DIR}")
 ANNOT_PATH_H5AD = os.path.join(RESULTS_DIR, "merged_annotated.h5ad")
 ANNOT_PATH_H5MU = os.path.join(RESULTS_DIR, "merged_annotated.h5mu")
 ANNOT_PATH_CSV = os.path.join(RESULTS_DIR, "doublet_qc_dataframe_pre_filtering.csv")
+MARKER_PATH = os.path.join(RESULTS_DIR, "cluster_markers_tidy.csv")
 
 adata = None
 if os.path.exists(ANNOT_PATH_H5MU):
@@ -81,6 +82,17 @@ doublet_df = pd.read_csv(
 )
 
 data.doublet_df = doublet_df   # attach to your DataLoader object    
+
+
+if os.path.exists(MARKER_PATH):
+    print(f"📂 Loading cluster markers from {MARKER_PATH}")
+    marker_df = pd.read_csv(MARKER_PATH)
+else:
+    marker_df = None
+    print("⚠️ No cluster_markers_tidy.csv found")
+
+data.marker_df = marker_df
+
 
 print(f"✅ Loaded dataset with {data.adata.n_obs} cells × {data.adata.n_vars} genes.")
 
